@@ -1,0 +1,253 @@
+name: eval gate
+
+on:
+  pull_request:
+  push:
+    # A merge to main is what PRODUCES the next baseline. Without this the
+    # baselines directory never fills and every PR gets REFUSE forever.
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: eval-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Verified: telemetry is on by default. Off, everywhere, always.
+  PROMPTFOO_DISABLE_TELEMETRY: '1'
+  # NEVER set PROMPTFOO_PASS_RATE_THRESHOLD. Gating is done in regressgate/gate.py.
+  # A typo in that variable silently becomes 100; setting it to 0 silently disables
+  # gating entirely. Both failure modes are invisible in the logs.
+  REPEAT: '3'
+
+jobs:
+  contract:
+    # The pinned promptfoo version's observable contract (exit codes, JSON shape,
+    # --repeat cache namespacing) is undocumented and has changed between minors.
+    # This job is seconds long, so it runs on every PR rather than only on upgrade
+    # -- "only on upgrade" is a detection problem we do not need to have.
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.pin.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: pin
+        run: echo "version=$(cat regressgate/promptfoo.version)" >> "$GITHUB_OUTPUT"
+      - name: Install pinned promptfoo
+        # EXACT version, no caret, no range. An npm range would silently move the
+        # contract under us between two runs of the same commit.
+        run: npm install -g "promptfoo@${{ steps.pin.outputs.version }}"
+      - name: Assert the installed version is the pinned one
+        run: |
+          got="$(promptfoo --version)"
+          [ "$got" = "${{ steps.pin.outputs.version }}" ] || {
+            echo "::error::promptfoo resolved to $got, pinned ${{ steps.pin.outputs.version }}"
+            exit 1
+          }
+      - name: Lint the workflows
+        # These files had never been schema-checked. A typo in a workflow is a
+        # gate that silently does not run, which is the worst failure mode here.
+        # ponytail: unpinned installer; pin the release if it ever breaks CI.
+        run: |
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          ./actionlint -color
+      - name: Harness self-checks
+        # Every module carries its own assertions; running them here means a
+        # broken harness fails before it can mis-report a quality verdict.
+        run: |
+          cd regressgate
+          python3 parse.py
+          python3 preflight.py --selfcheck
+          python3 pair.py --selfcheck
+          python3 fetch_baseline.py --selfcheck
+          python3 quarantine.py --selfcheck
+          python3 drift_monitor.py --selfcheck
+          PYTHONPATH=. python3 stats/adapter.py
+          python3 verdict_cache.py
+          python3 scenarios.py > /dev/null
+          python3 validate_workflows.py
+      - name: Contract test
+        env:
+          PROMPTFOO_CONFIG_DIR: ${{ runner.temp }}/pfcontract-${{ github.run_id }}-${{ github.run_attempt }}
+        run: bash regressgate/contract_test.sh
+
+  eval:
+    needs: contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm install -g "promptfoo@${{ needs.contract.outputs.version }}"
+
+      - name: Audit the env file before loading it
+        # Verified: --env-file OVERRIDES an already-exported PROMPTFOO_CONFIG_DIR.
+        # If a checked-in env file sets it, concurrent CI jobs collide in one config
+        # dir and corrupt each other's SQLite. Refuse to run rather than find out.
+        run: |
+          if [ -f eval/.env.ci ] && grep -qE '^[[:space:]]*(export[[:space:]]+)?PROMPTFOO_CONFIG_DIR=' eval/.env.ci; then
+            echo "::error::eval/.env.ci sets PROMPTFOO_CONFIG_DIR; it would override the per-run dir"
+            exit 1
+          fi
+
+      - name: Preflight the config
+        # `sharing:` POSTs the entire eval -- vars AND outputs -- to whatever host
+        # the config names, with no flag and exit 0. Verified against a local
+        # counting server. Nothing downstream can detect that it happened.
+        run: python3 regressgate/preflight.py --config eval/promptfooconfig.yaml --out head.json
+
+      - name: Restore promoted baselines
+        uses: actions/cache/restore@v4
+        with:
+          path: regressgate/baselines
+          key: regressgate-baselines-${{ github.run_id }}
+          restore-keys: |
+            regressgate-baselines-
+
+      - name: Restore verdict cache
+        # The retry-until-green defence only works if it survives a re-run.
+        # Measured: without it, five re-runs ship a -5pp regression 79% of the
+        # time. The cache is keyed per PR so one PR cannot pin another's verdict.
+        uses: actions/cache/restore@v4
+        with:
+          path: regressgate/.verdicts
+          key: regressgate-verdicts-${{ github.event.pull_request.number || github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            regressgate-verdicts-${{ github.event.pull_request.number || github.ref_name }}-
+
+      - name: Run head eval
+        id: head
+        env:
+          # Set AFTER the env-file audit, and unique per run AND per attempt.
+          PROMPTFOO_CONFIG_DIR: ${{ runner.temp }}/pfhead-${{ github.run_id }}-${{ github.run_attempt }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set +e
+          # --no-cache is mandatory: across runs, an identical re-run replays every
+          # value from cache, and with --repeat the cached values are keyed by repeat
+          # index, so bumping N mixes stale and fresh samples.
+          # There is no --fail-on-error flag. The docs claim there is. Do not add it.
+          promptfoo eval -c eval/promptfooconfig.yaml \
+            --no-cache --repeat "$REPEAT" -o "$RUNNER_TEMP/head.json"
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          # 0 and 100 are both normal here -- we gate in python, not on the exit code.
+          # 1 means the CLI never produced a verdict (missing API key, bad YAML) and
+          # 130 is SIGINT. Those are infrastructure, not quality.
+          if [ "$code" != 0 ] && [ "$code" != 100 ]; then
+            echo "::error::promptfoo exited $code before producing a verdict"
+            exit "$code"
+          fi
+
+      - name: Fetch baseline
+        id: baseline
+        run: |
+          # Baselines are keyed by CONTRACT, so the lookup itself refuses a
+          # comparison across a changed golden set, assertion, judge or pin. A
+          # miss is NOT an error: gate.py renders a REFUSE comment instead of
+          # guessing.
+          python3 regressgate/fetch_baseline.py \
+            --head "$RUNNER_TEMP/head.json" \
+            --out "$RUNNER_TEMP/baseline.json" --github-output || true
+
+      - name: Pair runs
+        run: |
+          python3 regressgate/pair.py \
+            --baseline "$RUNNER_TEMP/baseline.json" \
+            --head "$RUNNER_TEMP/head.json" \
+            --manifest regressgate/cases.manifest.json \
+            --quarantine regressgate/quarantine.json \
+            --head-sha "${{ github.event.pull_request.head.sha || github.sha }}" \
+            --baseline-sha "${{ steps.baseline.outputs.baseline_sha }}" \
+            --out "$RUNNER_TEMP/pairing.json"
+
+      - name: Gate
+        id: gate
+        run: |
+          mkdir -p regressgate/.verdicts
+          set +e
+          python3 regressgate/gate.py "$RUNNER_TEMP/pairing.json" \
+            --comment-out "$RUNNER_TEMP/comment.md" \
+            --cache-db regressgate/.verdicts/verdicts.db
+          echo "decision=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Save verdict cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: regressgate/.verdicts
+          key: regressgate-verdicts-${{ github.event.pull_request.number || github.ref_name }}-${{ github.run_id }}
+
+      - name: Post PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const p = `${process.env.RUNNER_TEMP}/comment.md`;
+            if (!fs.existsSync(p)) return;
+            const body = '<!-- regressgate -->\n' + fs.readFileSync(p, 'utf8');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const all = await github.paginate(github.rest.issues.listComments,
+              { owner, repo, issue_number });
+            const mine = all.find(c => c.body.startsWith('<!-- regressgate -->'));
+            if (mine) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Promote this run as the next baseline
+        # Only from main, and only from a run the gate did not reject. Promoting a
+        # blocked run would launder the regression into the baseline, after which
+        # every later PR measures against the worse suite and sees nothing.
+        if: github.event_name == 'push' && steps.gate.outputs.decision == '0'
+        run: |
+          python3 regressgate/fetch_baseline.py --head "$RUNNER_TEMP/head.json" \
+            --promote --git-sha "${{ github.sha }}"
+
+      - name: Save promoted baselines
+        if: github.event_name == 'push' && steps.gate.outputs.decision == '0'
+        uses: actions/cache/save@v4
+        with:
+          path: regressgate/baselines
+          key: regressgate-baselines-${{ github.run_id }}
+
+      - name: Enforce
+        run: |
+          case "${{ steps.gate.outputs.decision }}" in
+            0)  echo "gate: merge allowed" ;;
+            20) echo "::error::regressgate BLOCK -- statistically real quality regression"; exit 1 ;;
+            30) echo "::warning::regressgate REFUSE -- no compatible baseline, no verdict"; exit 1 ;;
+            40) echo "::error::regressgate HARD_FAIL -- case count mismatch, suite is wrong"; exit 1 ;;
+            50) echo "::error::regressgate HARNESS_ERROR -- infrastructure, not a quality verdict"; exit 1 ;;
+            *)  echo "::error::gate.py exited ${{ steps.gate.outputs.decision }}"; exit 1 ;;
+          esac
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regressgate-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/head.json
+            ${{ runner.temp }}/pairing.json
+            ${{ runner.temp }}/comment.md

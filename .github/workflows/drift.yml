@@ -1,0 +1,223 @@
+name: eval drift
+
+# promptfoo has NO scheduler and NO alerting sink. `eval --watch` is file-triggered,
+# not time-triggered. Anything periodic has to live here, in cron.
+
+on:
+  schedule:
+    # 06:17 UTC daily. Off the hour on purpose: the top of the hour is GitHub's
+    # busiest cron slot and scheduled runs there are routinely delayed.
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Run even if today already succeeded'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: eval-drift
+  # NOT cancel-in-progress. A cancelled drift run is a silent hole in the series,
+  # and the dead-man's switch would then fire on our own doing.
+  cancel-in-progress: false
+
+env:
+  PROMPTFOO_DISABLE_TELEMETRY: '1'
+  # Still never PROMPTFOO_PASS_RATE_THRESHOLD.
+
+jobs:
+  deadman:
+    # Fires when drift has not completed successfully in 30 hours (one daily run
+    # plus a generous slip). This catches a broken run; it CANNOT catch the
+    # workflow not firing at all -- for that, see the heartbeat step below.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: last
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh run list --workflow drift.yml --status success \
+                   --limit 1 --json updatedAt --jq '.[0].updatedAt // empty')
+          echo "at=$last" >> "$GITHUB_OUTPUT"
+      - name: Dead-man's switch (30h)
+        if: steps.last.outputs.at != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LAST: ${{ steps.last.outputs.at }}
+        run: |
+          age=$(( $(date -u +%s) - $(date -u -d "$LAST" +%s) ))
+          echo "last successful drift run: $LAST (${age}s ago)"
+          if [ "$age" -gt 108000 ]; then
+            echo "::error::no successful drift run in $((age/3600))h (limit 30h)"
+            gh issue create \
+              --title "eval drift: dead-man's switch fired ($((age/3600))h since last success)" \
+              --body "The nightly eval drift run has not succeeded since $LAST. Quality regressions on \`main\` are currently undetected." \
+              --label ops
+            exit 1
+          fi
+
+  drift:
+    needs: deadman
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Date-keyed idempotency marker
+        id: marker
+        uses: actions/cache/restore@v4
+        with:
+          path: .drift-marker
+          # One run per UTC day. A manual re-dispatch, a cron catch-up after a
+          # GitHub outage, and a re-run of the same day all restore the same
+          # marker and skip. NOT lookup-only: we need the file's contents, and
+          # lookup-only reports a hit without downloading anything.
+          key: eval-drift-${{ github.run_id }}
+          restore-keys: |
+            eval-drift-
+
+      - name: Decide whether to run
+        id: decide
+        run: |
+          today=$(date -u +%F)
+          if [ -f .drift-marker ] && [ "$(cat .drift-marker)" = "$today" ] \
+             && [ "${{ inputs.force }}" != "true" ]; then
+            echo "already ran for $today; skipping"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.decide.outputs.run == 'true'
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@v5
+        if: steps.decide.outputs.run == 'true'
+        with:
+          python-version: '3.12'
+      - name: Install pinned promptfoo
+        if: steps.decide.outputs.run == 'true'
+        run: npm install -g "promptfoo@$(cat regressgate/promptfoo.version)"
+
+      - name: Preflight the config
+        if: steps.decide.outputs.run == 'true'
+        run: python3 regressgate/preflight.py --config eval/promptfooconfig.yaml --out today.json
+
+      - name: Restore the run store
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          # The nightly series IS the product here. A lost store is not a lost
+          # run, it is a lost 40-night history and a chart that starts over.
+          path: regressgate/.store
+          key: regressgate-store-${{ github.run_id }}
+          restore-keys: |
+            regressgate-store-
+
+      - name: Restore promoted baselines
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: regressgate/baselines
+          key: regressgate-baselines-${{ github.run_id }}
+          restore-keys: |
+            regressgate-baselines-
+
+      - name: Drift eval against yesterday's baseline
+        if: steps.decide.outputs.run == 'true'
+        env:
+          PROMPTFOO_CONFIG_DIR: ${{ runner.temp }}/pfdrift-${{ github.run_id }}-${{ github.run_attempt }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          set +e
+          promptfoo eval -c eval/promptfooconfig.yaml \
+            --no-cache --repeat 5 -o "$RUNNER_TEMP/today.json"
+          code=$?
+          set -e
+          if [ "$code" != 0 ] && [ "$code" != 100 ]; then
+            echo "::error::promptfoo exited $code before producing a verdict"
+            exit "$code"
+          fi
+
+      - name: Gate (drift mode -- never blocks, always reports)
+        if: steps.decide.outputs.run == 'true'
+        id: gate
+        run: |
+          python3 regressgate/fetch_baseline.py --head "$RUNNER_TEMP/today.json" \
+            --out "$RUNNER_TEMP/baseline.json" --github-output || true
+          python3 regressgate/pair.py \
+            --baseline "$RUNNER_TEMP/baseline.json" --head "$RUNNER_TEMP/today.json" \
+            --manifest regressgate/cases.manifest.json \
+            --quarantine regressgate/quarantine.json \
+            --head-sha "${{ github.sha }}" \
+            --out "$RUNNER_TEMP/pairing.json"
+          set +e
+          # Deliberately NO --cache-db here. On a quiet week main does not move,
+          # so the verdict cache key would be identical every night and the first
+          # night's verdict would be replayed forever -- which is the exact
+          # opposite of what a drift monitor is for. The cache defends a PR
+          # against re-rolling; the nightly must re-roll.
+          python3 regressgate/gate.py "$RUNNER_TEMP/pairing.json" \
+            --comment-out "$RUNNER_TEMP/drift.md"
+          echo "decision=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Record tonight and run the drift monitor
+        if: steps.decide.outputs.run == 'true'
+        id: monitor
+        run: |
+          mkdir -p regressgate/.store
+          python3 regressgate/drift_monitor.py record \
+            --export "$RUNNER_TEMP/today.json" --db regressgate/.store/runs.db \
+            --git-sha "${{ github.sha }}" --repeat 5 --trigger nightly
+          set +e
+          python3 regressgate/drift_monitor.py check \
+            --db regressgate/.store/runs.db | tee "$RUNNER_TEMP/monitor.md"
+          echo "alarm=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: Save the run store
+        if: steps.decide.outputs.run == 'true' && always()
+        uses: actions/cache/save@v4
+        with:
+          path: regressgate/.store
+          key: regressgate-store-${{ github.run_id }}
+
+      - name: Open an issue on an EWMA alarm or a model swap
+        if: steps.decide.outputs.run == 'true' && steps.monitor.outputs.alarm == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "eval drift: monitor alarm on main ($(date -u +%F))" \
+            --body-file "$RUNNER_TEMP/monitor.md" --label ops
+
+      - name: Open an issue on a blocking drift
+        if: steps.decide.outputs.run == 'true' && steps.gate.outputs.decision == '20'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create --title "eval drift: regression on main ($(date -u +%F))" \
+            --body-file "$RUNNER_TEMP/drift.md" --label ops
+
+      - name: Write today's marker
+        if: steps.decide.outputs.run == 'true'
+        run: date -u +%F > .drift-marker
+      - name: Save marker
+        if: steps.decide.outputs.run == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .drift-marker
+          key: eval-drift-${{ github.run_id }}
+
+      - name: External heartbeat
+        # The only thing that catches "the workflow stopped firing entirely" --
+        # GitHub disables scheduled workflows after 60 days of repo inactivity and
+        # tells nobody. An external check-in service alarms on the MISSING ping.
+        if: steps.decide.outputs.run == 'true' && success()
+        run: curl -fsS --retry 3 --max-time 10 "${{ secrets.DRIFT_HEARTBEAT_URL }}" > /dev/null
