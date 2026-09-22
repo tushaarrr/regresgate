@@ -1,0 +1,5 @@
+prompts: ['{{payload}}']
+providers: [file://provider.py]
+tests:
+  - vars: {case_id: gamma, payload: x}
+    assert: [{type: contains, value: x}]

@@ -1,0 +1,5 @@
+prompts: ['{{payload}}']
+providers: [file://does_not_exist.py]
+tests:
+  - vars: {case_id: alpha, payload: hello}
+    assert: [{type: contains, value: hello}]

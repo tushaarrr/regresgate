@@ -1,0 +1,6 @@
+description: error-row fixture
+providers: [file://boom_provider.py]
+prompts: ['{{case_id}}']
+tests:
+  - vars: { case_id: delta }
+    assert: [{ type: contains, value: 'x' }]

@@ -1,0 +1,19 @@
+description: store-recall ingest fixture
+providers:
+  - id: file://echo_provider.py
+prompts:
+  - '{{case_id}}'
+tests:
+  - vars: { case_id: alpha }
+    assert:
+      - type: assert-set
+        assert:
+          - type: contains
+            value: 'answer:'
+          - type: contains
+            value: 'alpha'
+  - vars: { case_id: beta }
+    assert:
+      - type: contains
+        value: 'nope-this-fails'
+  - vars: { case_id: gamma }

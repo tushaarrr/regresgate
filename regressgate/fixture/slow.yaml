@@ -1,0 +1,5 @@
+prompts: ['{{payload}}']
+providers: [file://slow.py]
+tests:
+  - vars: {case_id: slow, payload: hi}
+    assert: [{type: contains, value: late}]

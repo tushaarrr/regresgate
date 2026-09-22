@@ -1,0 +1,2 @@
+prompts: [ "{{x}}"
+providers: echo

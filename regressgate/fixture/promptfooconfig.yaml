@@ -1,0 +1,26 @@
+description: regressgate runner fixture
+prompts:
+  - '{{payload}}'
+providers:
+  - file://provider.py
+tests:
+  - vars: {case_id: alpha, payload: hello world}
+    assert:
+      - type: contains
+        value: hello
+  - vars: {case_id: beta, payload: hello world}
+    assert:
+      - type: contains
+        value: goodbye
+  - vars: {case_id: gamma, payload: irrelevant}
+    assert:
+      - type: contains
+        value: irrelevant
+  - vars: {case_id: delta, payload: hello world}
+    assert:
+      - type: assert-set
+        assert:
+          - type: contains
+            value: hello
+          - type: contains
+            value: nope
