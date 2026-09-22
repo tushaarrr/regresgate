@@ -1,0 +1,19 @@
+{
+  "suite": "regressgate placeholder suite",
+  "n_cases_expected": 12,
+  "dataset_sha": "d66da3ee45d1aa4b",
+  "case_ids": [
+    "cancel-refund",
+    "cancel-self",
+    "delete-account",
+    "export-data",
+    "invoice-past",
+    "invoice-vat",
+    "refund-partial",
+    "refund-window",
+    "seat-add",
+    "seat-remove",
+    "sso-scim",
+    "sso-setup"
+  ]
+}
