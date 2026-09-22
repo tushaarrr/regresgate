@@ -124,7 +124,7 @@ reading:
   nobody committed. An independent re-derivation got 0.205 per run where the
   docstring said 0.268. Rebuilt as `retry_sim.py`, which scores every simulated
   run with the gate's own function: at the parameters the old table claimed, the
-  real figure is **67%**, and at this suite's measured churn, **60%**.
+  real figure is **67%**, and at this suite's measured churn, **58%**.
 
 The second one is the more embarrassing and the more general. The number was
 not a guess — someone ran something. But the something was not committed, so a

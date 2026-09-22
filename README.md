@@ -8,7 +8,7 @@ A statistical regression gate for LLM evals, built on top of
 
 Four things this repo found along the way, each measured rather than assumed:
 
-- **Re-running CI ships a −5pp regression 60% of the time after five
+- **Re-running CI ships a −5pp regression 58% of the time after five
   attempts**, and a −3pp one 99%. A gate is a random variable and re-rolling it
   is free, so the verdict is cached per `(commit, baseline, judge)` rather than
   recomputed. Regenerate the table with `python3 regressgate/retry_sim.py`.
@@ -100,7 +100,7 @@ So there are four fixed guardrails instead:
 
 - **Verdict caching.** The gate is a random variable, and re-running CI
   re-rolls it. Measured at this suite's own churn: without this, five re-runs
-  ship a −5pp regression **60%** of the time and a −3pp one 96% after three.
+  ship a −5pp regression **58%** of the time and a −3pp one 95% after three.
   Most of that leak is the materiality bar, not the significance test. The verdict
   is a pure function of `(candidate sha, baseline sha, judge snapshot)` and is
   cached, so a re-run is a lookup. Genuine re-measurement must *pool*
@@ -234,11 +234,11 @@ Built, green in CI, and measured. Five A/A replays of the 300-case suite with
 | | measured | guardrail | |
 |---|---|---|---|
 | pass rate | 93.0% – 94.0% across replays | | |
-| churn | 1.40% | ≤ 6% | ok |
-| quarantined | 9 cases | ≤ 45 (15% of the suite) | ok |
-| power@−5pp | 0.965 | ≥ 0.60 | ok |
+| churn | 1.27% | ≤ 6% | ok |
+| quarantined | 8 cases | ≤ 45 (15% of the suite) | ok |
+| power@−5pp | 0.968 | ≥ 0.60 | ok |
 
-291 cases gate. The nine unstable ones are in
+292 cases gate. The eight unstable ones are in
 [regressgate/quarantine.json](regressgate/quarantine.json) together with the
 contract key they were measured on; a changed golden set, judge or pin makes
 that file inert until the replays are re-run, and churn over the ceiling makes

@@ -1,9 +1,9 @@
 {
-  "measured_at": "2026-09-22T07:17:33Z",
+  "measured_at": "2026-09-22T19:50:10Z",
   "contract_key": {
     "suite": "Meridian Support Assistant",
     "dataset_sha": "92a7d5f1e70ff04c",
-    "assertions_sha": "549867f7cf24dab3",
+    "assertions_sha": "999151b72df7da08",
     "judge_snapshot": "openai:gpt-4o-2024-11-20",
     "promptfoo_version": "0.123.1"
   },
@@ -11,21 +11,20 @@
   "quarantined": [
     "auth-022",
     "clr-001",
-    "clr-002",
-    "fp-010",
-    "inj-024",
-    "num-018",
+    "fp-014",
+    "nip-027",
     "num-035",
+    "pl-012",
     "pl-015",
-    "pl-053"
+    "pl-026"
   ],
   "watchlist": [],
   "n_cases": 300,
-  "n_gating_cases": 291,
-  "churn": 0.014,
+  "n_gating_cases": 292,
+  "churn": 0.01267,
   "churn_ceiling": 0.06,
   "churn_ok": true,
-  "power_at_5pp": 0.965,
+  "power_at_5pp": 0.968,
   "power_floor": 0.6,
   "power_ok": true,
   "exclusion_cap": 45,

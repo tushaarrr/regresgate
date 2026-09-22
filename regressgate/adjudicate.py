@@ -4,7 +4,7 @@
 When the gate BLOCKs, "was that real?" is a legitimate question and re-measuring
 is a legitimate answer -- but only if the re-measurement POOLS evidence. Taking
 the most favourable of several runs is exactly the retry attack the verdict
-cache exists to stop (measured: a -5pp regression ships 60% of the time after
+cache exists to stop (measured: a -5pp regression ships 58% of the time after
 five re-runs), just run deliberately instead of by accident. So this module runs
 a FIXED K, sums every replicate's discordant pairs into ONE (b, c, n), and
 applies ONE test to that pooled tally. The K replicates must be K DISTINCT runs

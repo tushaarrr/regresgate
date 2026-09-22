@@ -69,7 +69,7 @@ def cache_keys(doc):
 
     The verdict is a pure function of these three, so a re-run is a lookup, not
     a new roll of the dice. Measured: without this, re-running CI five times
-    ships a -5pp regression 60% of the time and a -3pp one 96% of the time after
+    ships a -5pp regression 58% of the time and a -3pp one 95% of the time after
     three (retry_sim.py, at this suite's measured churn). The developer samples exactly the distribution the gate samples, so no
     amount of threshold calibration touches it -- best-of-k IS the attack.
     """

@@ -1,13 +1,13 @@
 """Retry-until-green defence, and the power floor.
 
 Measured attack. A developer who just re-runs CI ships a regression with
-probability (N=291 gating cases, churn 1.40% -- both measured on this suite by
+probability (N=292 gating cases, churn 1.27% -- both measured on this suite by
 quarantine.py -- 40k trials, seed 20260922):
 
     true drop   1 run   2 runs  3 runs  5 runs
-      -2pp      0.881   0.986   0.998   1.000
-      -3pp      0.646   0.875   0.956   0.994
-      -5pp      0.167   0.306   0.422   0.599   <- the design effect size
+      -2pp      0.880   0.985   0.998   1.000
+      -3pp      0.638   0.869   0.953   0.994
+      -5pp      0.160   0.294   0.407   0.582   <- the design effect size
      -10pp      0.000   0.001   0.001   0.001
 
 Regenerate with `python3 retry_sim.py`, which scores every simulated run with

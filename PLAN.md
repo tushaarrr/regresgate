@@ -14,7 +14,7 @@ Five things in the original plan were wrong or unsafe. In descending order of co
 
 | # | The draft said | Measured reality | Consequence |
 |---|---|---|---|
-| 1 | *(nothing)* | **Re-running CI ships a −5pp regression 60% of the time after 5 attempts** (`retry_sim.py`) | The entire N-vs-churn apparatus was decoration. Fixed by verdict caching. |
+| 1 | *(nothing)* | **Re-running CI ships a −5pp regression 58% of the time after 5 attempts** (`retry_sim.py`) | The entire N-vs-churn apparatus was decoration. Fixed by verdict caching. |
 | 2 | Build an outcome-learning loop that recalibrates thresholds | **A loop is dominated by a zero-label policy, and its recommended substitute goes blind while reporting itself calibrated** | The RHCL layer is cut to four guardrails. |
 | 3 | `--repeat` + cache replays one value N times (issue #360) | **False since 0.121.4.** Cache is namespaced per repeat index | The trap is real but *cross-run*, and nastier than described. |
 | 4 | Read `__repeatIndex` in a Python assertion | **It is `None` there, stripped by design** | The documented workaround cannot work. Use provider echo. |
@@ -190,9 +190,9 @@ here used to be that at N=300 the smallest detectable shift is ≈−2.0pp, so c
 "essentially never binds on its own". Both halves were wrong. The smallest shift the one-sided
 exact test can call at N=300 is **−1.67pp** (b=0, c=5, p=0.031), whose CI upper is −0.22pp — so
 condition (2) turns it into a COMMENT, which is condition (2) binding. Measured over the whole
-distribution by `retry_sim.py` at N=291 and the suite's measured 1.40% churn, of the 16.7% of true
-−5pp regressions that survive a single run, **13.6 points are the materiality bar and 3.1 points
-are the significance test**; at −3pp it is 38.2 against 26.4. The retry attack in §5 exists mostly
+distribution by `retry_sim.py` at N=292 and the suite's measured 1.27% churn, of the 16.0% of true
+−5pp regressions that survive a single run, **13.4 points are the materiality bar and 2.6 points
+are the significance test**; at −3pp it is 38.9 against 24.9. The retry attack in §5 exists mostly
 because (2) binds. Keep the floor, and size the suite for it deliberately; do not raise it to 2pp
 on the belief that it is inert.
 
@@ -254,7 +254,7 @@ concern from the design.
 ### What to build instead — four guardrails, no loop
 
 **A. Verdict caching, keyed on (candidate SHA, baseline SHA, judge snapshot).**
-Without it a −5pp regression ships 60% of the time after five re-runs and a −3pp ships 96% after
+Without it a −5pp regression ships 58% of the time after five re-runs and a −3pp ships 95% after
 three. No threshold calibration touches this — the developer samples the same distribution the
 gate samples. Any genuine re-measurement must **pool** repetitions; best-of-k *is* the attack.
 Highest-value item in the project, and it is an afternoon. Implemented: `verdict_cache.py`.
@@ -408,7 +408,7 @@ Each of these exists because something broke without it.
 
 **All phases 0–7 are built, run end to end against the published binary, and measured.** The suite
 is the 300-case Meridian Support Assistant set (`eval/`, [PHASE0.md](eval/PHASE0.md)); five A/A
-replays give churn 1.40%, 9 quarantined cases and power@−5pp = 0.965, so the gate blocks rather
+replays give churn 1.27%, 8 quarantined cases and power@−5pp = 0.968, so the gate blocks rather
 than comments. What follows records what each phase turned out to be, including where the plan was
 wrong.
 
