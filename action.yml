@@ -1,0 +1,176 @@
+name: regressgate
+description: >-
+  Decide whether a drop in your LLM eval pass rate is a real regression, and
+  block the merge only when it is. Paired exact McNemar, a materiality floor, a
+  verdict cache that defeats retry-until-green, and a refusal when the runs are
+  not comparable.
+branding:
+  icon: git-pull-request
+  color: purple
+
+inputs:
+  export:
+    description: >-
+      Path to this run's promptfoo export (the `-o run.json` file). The only
+      required input. Nothing here runs your eval for you -- you already did.
+    required: true
+  quarantine:
+    description: >-
+      Calibration from `quarantine.py`: churn, the exclusion list and
+      power@-5pp. Without it the power floor is UNMEASURED and every BLOCK
+      degrades to a comment, deliberately.
+    required: false
+    default: ''
+  manifest:
+    description: Expected case ids, so a silently shrunken suite HARD_FAILs instead of passing.
+    required: false
+    default: ''
+  baseline-dir:
+    description: Where promoted baselines live. Cache this between runs.
+    required: false
+    default: .regressgate/baselines
+  cache-db:
+    description: >-
+      Verdict cache. Cache this between runs or the retry defence does nothing:
+      the verdict is a pure function of (candidate sha, baseline sha, judge),
+      and a re-run should be a lookup, not a new roll of the dice.
+    required: false
+    default: .regressgate/verdicts.db
+  promote:
+    description: >-
+      Promote this run as the next baseline. Set it on pushes to your default
+      branch, never on a pull request. A BLOCK never promotes; a REFUSE does,
+      because that is the only way a fresh repo ever gets a first baseline.
+    required: false
+    default: 'false'
+  comment:
+    description: Post the verdict as a pull request comment (needs pull-requests:write).
+    required: false
+    default: 'true'
+  fail-on-block:
+    description: >-
+      Fail the step when the gate BLOCKs. Set to false to run advisory-only
+      while you build confidence in the suite.
+    required: false
+    default: 'true'
+
+outputs:
+  decision:
+    description: PASS, COMMENT, BLOCK, REFUSE, HARD_FAIL or HARNESS_ERROR.
+    value: ${{ steps.gate.outputs.decision }}
+  exit-code:
+    description: 0 PASS/COMMENT, 20 BLOCK, 30 REFUSE, 40 HARD_FAIL, 50 HARNESS_ERROR.
+    value: ${{ steps.gate.outputs.code }}
+  comment-path:
+    description: The rendered markdown verdict, whether or not it was posted.
+    value: ${{ steps.gate.outputs.comment }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check the environment
+      shell: bash
+      run: python3 "${{ github.action_path }}/regressgate/doctor.py" --quiet || true
+
+    - name: Fetch a comparable baseline
+      id: baseline
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$(dirname "${{ inputs.cache-db }}")" "${{ inputs.baseline-dir }}"
+        # A miss is NOT an error. The gate renders a REFUSE rather than guessing,
+        # because a comparison across a changed suite, judge or pin is not a
+        # comparison. --github-output carries the chosen baseline's sha, which is
+        # half the verdict cache key.
+        python3 "${{ github.action_path }}/regressgate/fetch_baseline.py" \
+          --head "${{ inputs.export }}" \
+          --dir "${{ inputs.baseline-dir }}" \
+          --out "${RUNNER_TEMP}/regressgate-baseline.json" \
+          --github-output || true
+
+    - name: Pair the runs
+      shell: bash
+      run: |
+        set -euo pipefail
+        # NOT `[ -n x ] && args+=(...)`: under `set -e` a false test is the last
+        # command of the line and kills the step.
+        args=()
+        if [ -n "${{ inputs.manifest }}" ]; then args+=(--manifest "${{ inputs.manifest }}"); fi
+        if [ -n "${{ inputs.quarantine }}" ]; then args+=(--quarantine "${{ inputs.quarantine }}"); fi
+        python3 "${{ github.action_path }}/regressgate/pair.py" \
+          --head "${{ inputs.export }}" \
+          --baseline "${RUNNER_TEMP}/regressgate-baseline.json" \
+          --head-sha "${{ github.event.pull_request.head.sha || github.sha }}" \
+          --baseline-sha "${{ steps.baseline.outputs.baseline_sha }}" \
+          --out "${RUNNER_TEMP}/regressgate-pairing.json" \
+          "${args[@]}"
+
+    - name: Gate
+      id: gate
+      shell: bash
+      run: |
+        set +e
+        # Never read the exit code through a pipe -- `cmd | tee` gives you tee's
+        # status. Capture to a file, read $?, then show it.
+        python3 "${{ github.action_path }}/regressgate/gate.py" \
+          "${RUNNER_TEMP}/regressgate-pairing.json" \
+          --comment-out "${RUNNER_TEMP}/regressgate-comment.md" \
+          --cache-db "${{ inputs.cache-db }}" > "${RUNNER_TEMP}/regressgate-gate.log" 2>&1
+        code=$?
+        set -e
+        cat "${RUNNER_TEMP}/regressgate-gate.log"
+        {
+          echo "code=$code"
+          echo "comment=${RUNNER_TEMP}/regressgate-comment.md"
+          echo "decision=$(grep -o 'DECISION=[A-Z_]*' "${RUNNER_TEMP}/regressgate-gate.log" 2>/dev/null | head -1 | cut -d= -f2)"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Post the verdict
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const p = `${process.env.RUNNER_TEMP}/regressgate-comment.md`;
+          if (!fs.existsSync(p)) return;
+          const body = '<!-- regressgate -->\n' + fs.readFileSync(p, 'utf8');
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+          // Update in place. A gate that posts a new comment per run trains
+          // people to collapse the thread, which is how the verdict stops being read.
+          const all = await github.paginate(github.rest.issues.listComments,
+            { owner, repo, issue_number });
+          const mine = all.find(c => c.body.startsWith('<!-- regressgate -->'));
+          if (mine) {
+            await github.rest.issues.updateComment({ owner, repo, comment_id: mine.id, body });
+          } else {
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+          }
+
+    - name: Promote this run as the next baseline
+      # Never on a BLOCK: promoting one launders the regression into the baseline,
+      # after which every later pull request measures against the worse suite and
+      # sees nothing. 30 (REFUSE) must promote -- it means "could not compare",
+      # and a new baseline on the new contract is exactly what it asks for.
+      if: ${{ inputs.promote == 'true' && (steps.gate.outputs.code == '0' || steps.gate.outputs.code == '30') }}
+      shell: bash
+      run: |
+        python3 "${{ github.action_path }}/regressgate/fetch_baseline.py" \
+          --head "${{ inputs.export }}" \
+          --dir "${{ inputs.baseline-dir }}" \
+          --git-sha "${{ github.sha }}" \
+          --promote
+
+    - name: Enforce
+      if: ${{ inputs.fail-on-block == 'true' }}
+      shell: bash
+      run: |
+        code="${{ steps.gate.outputs.code }}"
+        case "$code" in
+          0) echo "::notice::regressgate: merge allowed" ;;
+          20) echo "::error::regressgate: BLOCK -- a statistically real regression"; exit 1 ;;
+          30) echo "::warning::regressgate: REFUSE -- no comparable baseline, no verdict computed" ;;
+          40) echo "::error::regressgate: HARD_FAIL -- the suite itself is wrong"; exit 1 ;;
+          50) echo "::error::regressgate: HARNESS_ERROR -- infrastructure, NOT a quality verdict"; exit 1 ;;
+          *) echo "::error::regressgate: unexpected exit $code"; exit 1 ;;
+        esac

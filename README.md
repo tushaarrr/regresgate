@@ -119,6 +119,8 @@ So there are four fixed guardrails instead:
 ## Quick start
 
 ```bash
+python3 regressgate/doctor.py     # what is missing, and the command that fixes it
+
 npm install -g "promptfoo@$(cat regressgate/promptfoo.version)"   # node >= 22.22.0
 export OPENAI_API_KEY=...
 
@@ -141,6 +143,22 @@ python3 regressgate/pair.py --head /tmp/head.json --baseline /tmp/base.json \
     --out /tmp/pairing.json          # fetch_baseline.py --list shows the baseline's sha
 python3 regressgate/gate.py /tmp/pairing.json --cache-db /tmp/verdicts.db
 ```
+
+### Or as a GitHub Action
+
+You run your eval; this decides what the result means.
+
+```yaml
+- run: promptfoo eval -c eval/promptfooconfig.yaml --no-cache --repeat 3 -o run.json
+- uses: tushaarrr/regresgate@main
+  with:
+    export: run.json
+    quarantine: regressgate/quarantine.json      # or the gate only comments
+    promote: ${{ github.ref == 'refs/heads/main' }}
+```
+
+Cache `.regressgate/` between runs, or the verdict cache cannot defeat a re-run.
+[action.yml](action.yml) documents every input.
 
 The whole harness self-checks with no API key and no test framework:
 
@@ -165,6 +183,10 @@ for m in parse preflight pair fetch_baseline quarantine drift_monitor \
 | `regressgate/triage.py` | groups the broken cases by judge rationale. Reads only |
 | `regressgate/adjudicate.py` | fixed-K **pooled** re-measurement. Logged, never controlled |
 | `regressgate/escape_monitor.py` | production incidents vs what the gate said. The only external check |
+| `regressgate/doctor.py` | prerequisites, with the exact command that fixes each one |
+| `regressgate/retry_sim.py` | regenerates the retry-until-green table; the only source for those numbers |
+| `eval/lint_cases.py` | asks whether a golden case can tell a right answer from a wrong one |
+| `action.yml` | the composite Action: bring your own eval export |
 | `tests/`, `regressgate/contract_test.sh` | twelve named contract tests and seven shell checks, one per promptfoo behaviour the harness depends on; both run in CI against the published binary, never a checkout |
 
 [PLAN.md](PLAN.md) is the design document, including what was cut and why.
