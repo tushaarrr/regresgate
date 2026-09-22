@@ -6,6 +6,29 @@ A statistical regression gate for LLM evals, built on top of
 > **It tells you whether the drop is real, and it catches the drop that no
 > commit caused.**
 
+Four things this repo found along the way, each measured rather than assumed:
+
+- **Re-running CI ships a −5pp regression 79% of the time after five
+  attempts.** A gate is a random variable and re-rolling it is free, so the
+  verdict is cached per `(commit, baseline, judge)` rather than recomputed.
+- **`sharing:` in a promptfoo config POSTs your entire eval off-box** — vars
+  and outputs — exits 0, and warns about nothing. No promptfoo document
+  mentions it. `preflight.py` refuses to run a config that sets it.
+- **`--fail-on-error` appears in promptfoo's own docs in 8 places across 6
+  files and does not exist.** Twelve contract tests pin the behaviours this
+  harness actually depends on, so an upgrade names the broken assumption.
+- **A self-calibrating version of this gate was designed, simulated four ways,
+  and deleted.** It converges to the human override rate, not to anything
+  true, and its "was this a false alarm?" button is an attack surface: clicking
+  it on every override drives power against the design effect size to 0.049.
+  [PLAN.md](PLAN.md) §5 has the argument and the numbers.
+
+[BUILD.md](BUILD.md) covers how it was built, including the multi-agent review
+that found 36 mutations which broke real logic while the tests stayed green —
+of which only 2 were production bugs.
+
+---
+
 promptfoo runs your eval and tells you the pass rate. Everything after that is
 unbuilt, and that gap is this project. A pass rate that moved from 94% to 91%
 is not information: on a 300-case suite that is well inside the noise a fixed

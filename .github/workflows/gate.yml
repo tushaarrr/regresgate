@@ -33,6 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.pin.outputs.version }}
+      has_key: ${{ steps.key.outputs.present }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -109,8 +110,35 @@ jobs:
           PROMPTFOO_CONFIG_DIR: ${{ runner.temp }}/pfcontract-${{ github.run_id }}-${{ github.run_attempt }}
         run: bash regressgate/contract_test.sh
 
+      - name: End-to-end, offline
+        # The whole pipeline -- preflight, promote, pair, gate, verdict cache,
+        # quarantine, drift -- against a deterministic fixture provider. No API
+        # key, no model, no cost, and it is the only test that can prove the
+        # parts COMPOSE: five of them were individually correct and did not.
+        env:
+          PROMPTFOO_CONFIG_DIR: ${{ runner.temp }}/pfe2e-${{ github.run_id }}-${{ github.run_attempt }}
+        run: cd regressgate && bash e2e_test.sh
+
+      - id: key
+        # The secrets context is not available in a job-level `if`, so the
+        # answer has to travel as a job output. Anyone who clones this repo
+        # gets the full harness proven green; only the live eval needs a key.
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::OPENAI_API_KEY is not set, so the live eval job is skipped. The harness above is fully tested without it."
+          fi
+
   eval:
     needs: contract
+    # Skipped, not failed, when there is no key. A red X on a repo someone just
+    # cloned says "this is broken"; a skipped job says "this part needs a
+    # credential you have not given it", which is the truth.
+    if: needs.contract.outputs.has_key == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
