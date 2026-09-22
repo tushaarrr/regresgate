@@ -1,0 +1,23 @@
+{
+  "measured_at": "2026-09-22T01:29:43Z",
+  "contract_key": {
+    "suite": "regressgate placeholder suite",
+    "dataset_sha": "d66da3ee45d1aa4b",
+    "assertions_sha": "fd268f4c7ecee231",
+    "judge_snapshot": "none:no-model-graded-assertions",
+    "promptfoo_version": "0.123.1"
+  },
+  "aa_runs": 5,
+  "quarantined": [],
+  "watchlist": [],
+  "n_cases": 12,
+  "n_gating_cases": 12,
+  "churn": 0.0,
+  "churn_ceiling": 0.06,
+  "churn_ok": true,
+  "power_at_5pp": 0.001,
+  "power_floor": 0.6,
+  "power_ok": false,
+  "exclusion_cap": 1,
+  "exclusion_ok": true
+}
