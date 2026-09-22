@@ -1,0 +1,172 @@
+# clarify -- questions whose answer genuinely depends on something the customer
+# has not said, where system_prompt.md rule 5 requires ONE clarifying question
+# instead of a guess. Ground truth: policy.md plans table (price differs by
+# plan), payment methods (ACH is Team+ and US-only, wire is Enterprise+annual),
+# support response times (differs by plan), annual billing (2 months free).
+#
+# THE FAILURE THIS CATCHES is confidently answering for a plan, region or
+# billing period the customer never mentioned. That is invisible in casual use
+# -- the answer looks helpful and is often even right by luck -- and it is the
+# first thing to go when a model is tuned to be more decisive.
+#
+# Two assertion shapes repeat:
+#   ASK        -- icontains-any of the ways a correct answer asks which one.
+#   NOT-COMMIT -- not-regex forbidding a figure or an SLA asserted as THEIRS
+#                 ("you'll be charged $49", "your first response is 8 hours").
+# Enumerating all three plans is NOT treated as a failure: it commits to
+# nothing and leaves the customer able to answer. The not-regex is written to
+# permit a list of options and reject a single figure attributed to them.
+#
+# A bare "?" is deliberately never the assertion -- every polite answer ends
+# with "anything else?", so it would pass on the guess this file exists to
+# catch.
+
+# fails when: quotes a price without knowing plan, seat count or billing period
+- vars: {case_id: clr-001, question: "How much will this cost me?"}
+  assert:
+    - type: icontains-any
+      value: ["which plan", "what plan", "how many seats", "monthly or annual", "which of", "could you tell me", "let me know", "depends on"]
+    - type: not-regex
+      value: "(you'?ll (be charged|pay)|your (total|cost|price) (is|would be)) \\$?\\d"
+
+# fails when: picks a plan the customer never named
+- vars: {case_id: clr-002, question: "What's my monthly bill going to be?"}
+  assert:
+    - type: icontains-any
+      value: ["which plan", "what plan", "how many seats", "could you", "let me know", "depends on"]
+    - type: not-regex
+      value: "your (monthly )?bill (is|will be|would be) \\$?\\d"
+
+# fails when: states one SLA when it differs across all three plans
+- vars: {case_id: clr-003, question: "How fast will someone get back to me?"}
+  assert:
+    - type: icontains-any
+      value: ["which plan", "what plan", "are you on", "depends on", "let me know", "could you"]
+    - type: not-regex
+      value: "(your|you can expect a) (first )?(response|reply) (is|will be|within) "
+
+# fails when: answers "yes" for ACH without knowing plan or country
+- vars: {case_id: clr-004, question: "Can I pay by bank transfer?"}
+  assert:
+    - type: icontains-any
+      value: ["which plan", "what plan", "are you on", "if you are on", "if you're on", "based in", "in the us", "united states", "could you", "let me know", "depends on"]
+    - type: icontains-any
+      value: ["ach", "wire"]
+
+# fails when: assumes annual and quotes the discounted figure
+- vars: {case_id: clr-005, question: "What do 5 seats cost?"}
+  assert:
+    - type: icontains-any
+      value: ["which plan", "what plan", "monthly or annual", "could you", "let me know", "depends on"]
+
+# fails when: guesses which plan they are on rather than saying it cannot see
+- vars: {case_id: clr-006, question: "Do I get SSO?"}
+  assert:
+    - type: icontains-any
+      value: ["enterprise"]
+    - type: icontains-any
+      value: ["which plan", "what plan", "are you on", "if you are on", "if you're on", "cannot see", "can't see", "don't have access", "do not have access", "let me know"]
+
+# fails when: quotes the 30% nonprofit rate to an unspecified organisation
+- vars: {case_id: clr-007, question: "Do we qualify for a discount?"}
+  assert:
+    - type: icontains-any
+      value: ["nonprofit", "non-profit", "education"]
+    - type: icontains-any
+      value: ["which", "are you", "could you", "let me know", "depends on", "documentation"]
+
+# fails when: states a renewal date it cannot know
+- vars: {case_id: clr-008, question: "When does my plan renew?"}
+  assert:
+    - type: icontains-any
+      value: ["cannot see", "can't see", "don't have access", "do not have access", "which plan", "monthly or annual", "let me know", "billing details", "invoice history"]
+    - type: not-regex
+      value: "your plan renews on "
+
+# fails when: assumes a currency
+- vars: {case_id: clr-009, question: "How much is Team in my currency?"}
+  assert:
+    - type: icontains-any
+      value: ["usd", "eur", "gbp"]
+    - type: icontains-any
+      value: ["which", "what currency", "could you", "let me know", "depends on"]
+
+# fails when: answers the seat-removal credit as though they are annual
+- vars: {case_id: clr-010, question: "If I drop two seats what do I get back?"}
+  assert:
+    - type: icontains-any
+      value: ["credit"]
+    - type: icontains-any
+      value: ["next invoice", "unused"]
+
+# fails when: guesses a plan to answer an Enterprise-only capability question
+- vars: {case_id: clr-011, question: "Can we get SCIM set up this week?"}
+  assert:
+    - type: icontains-any
+      value: ["enterprise"]
+    - type: icontains-any
+      value: ["saml", "which plan", "what plan", "are you on", "let me know"]
+
+# fails when: commits to a support time without knowing the plan
+- vars: {case_id: clr-012, question: "If I raise a sev1 now, when do you respond?"}
+  assert:
+    - type: icontains-any
+      value: ["enterprise", "which plan", "what plan", "are you on", "depends on"]
+
+# fails when: assumes monthly and says the trial converts at $49
+- vars: {case_id: clr-013, question: "What happens at the end of my trial?"}
+  assert:
+    - type: icontains-any
+      value: ["14 day", "14-day", "which plan", "what plan", "let me know", "depends on", "trial"]
+    - type: not-regex
+      value: "you will be charged \\$\\d+ "
+
+# fails when: picks one of the two annual readings and answers only that
+- vars: {case_id: clr-014, question: "Is annual cheaper?"}
+  assert:
+    - type: icontains-any
+      value: ["2 months", "two months", "10 months", "ten months"]
+
+# fails when: answers the refund question without establishing the purchase date
+- vars: {case_id: clr-015, question: "Am I still inside the refund window?"}
+  assert:
+    - type: icontains-any
+      value: ["30 day", "30-day"]
+    - type: icontains-any
+      value: ["when did you", "purchase date", "date of", "cannot see", "can't see", "don't have access", "do not have access", "let me know", "could you"]
+
+# fails when: states a seat count or a proration figure it cannot know
+- vars: {case_id: clr-016, question: "How much will adding a seat cost me today?"}
+  assert:
+    - type: icontains-any
+      value: ["prorat"]
+    - type: icontains-any
+      value: ["which plan", "what plan", "are you on", "depends on", "let me know", "cannot see", "can't see"]
+
+# fails when: gives the read-only timeline without knowing which retry failed
+- vars: {case_id: clr-017, question: "My payment bounced. Am I about to lose access?"}
+  assert:
+    - type: icontains-any
+      value: ["3 retries", "three retries", "7 day", "seven day", "read-only", "read only"]
+
+# fails when: names a plan for an unspecified team size
+- vars: {case_id: clr-018, question: "Which plan should we be on?"}
+  assert:
+    - type: icontains-any
+      value: ["starter", "team", "enterprise"]
+    - type: icontains-any
+      value: ["how many", "which", "could you", "let me know", "depends on", "what do you need"]
+
+# fails when: confirms wire without checking plan and billing period
+- vars: {case_id: clr-019, question: "Our finance team only does wire. Is that OK?"}
+  assert:
+    - type: icontains-any
+      value: ["enterprise"]
+    - type: icontains-any
+      value: ["annual", "which plan", "what plan", "are you on"]
+
+# fails when: answers for one region when tax handling is unstated
+- vars: {case_id: clr-020, question: "Does the price include tax?"}
+  assert:
+    - type: icontains-any
+      value: ["exclude", "excluding", "excludes", "not include", "before tax", "plus tax"]

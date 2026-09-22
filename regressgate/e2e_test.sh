@@ -47,6 +47,13 @@ python3 fetch_baseline.py --head "$T/base.json" --dir "$T/bl" --promote \
   --git-sha base-sha >"$T/promote.log" 2>&1
 [ $? -eq 0 ] && ok "baseline promoted under its contract hash" || bad "promote failed"
 
+# The fixture's OWN manifest, generated from its own baseline run. Borrowing
+# regressgate/cases.manifest.json would compare a 12-case fixture against the
+# 300-case real suite and HARD_FAIL on the count -- which is the gate working,
+# but it is not what this test is asking.
+python3 pair.py --head "$T/base.json" --write-manifest "$T/manifest.json" >/dev/null 2>&1
+[ $? -eq 0 ] && ok "fixture manifest generated from its own baseline" || bad "manifest failed"
+
 echo "== head run with a real regression =="
 REGRESSGATE_DEMO_BREAK=2 code=$(REGRESSGATE_DEMO_BREAK=2 pf "$T/head.json")
 [ "$code" = 100 ] && ok "failing head exits 100 (not 1, not 0)" || bad "head exited $code"
@@ -60,7 +67,7 @@ echo '{"quarantined":[],"watchlist":[],"power_ok":true,"measured_at":"'"$(date -
   > "$T/q_healthy.json"
 
 python3 pair.py --head "$T/head.json" --baseline "$T/baseline.json" \
-  --manifest cases.manifest.json --quarantine "$T/q_healthy.json" \
+  --manifest "$T/manifest.json" --quarantine "$T/q_healthy.json" \
   --head-sha head-sha-1 --baseline-sha base-sha --out "$T/pairing.json" >"$T/pair.log" 2>&1
 [ $? -eq 0 ] && ok "pairer built a pairing doc" || { bad "pair.py failed"; cat "$T/pair.log"; }
 grep -q '"paired": 36' "$T/pairing.json" \
@@ -76,7 +83,7 @@ rc=$?
 echo "== retry-until-green: same commit, code secretly FIXED, re-run CI =="
 code=$(pf "$T/head_fixed.json")
 python3 pair.py --head "$T/head_fixed.json" --baseline "$T/baseline.json" \
-  --manifest cases.manifest.json --quarantine "$T/q_healthy.json" \
+  --manifest "$T/manifest.json" --quarantine "$T/q_healthy.json" \
   --head-sha head-sha-1 --baseline-sha base-sha --out "$T/pairing_retry.json" >/dev/null 2>&1
 python3 gate.py "$T/pairing_retry.json" --cache-db "$T/v.db" >"$T/gate2.log" 2>&1
 rc=$?
@@ -86,7 +93,7 @@ rc=$?
 
 echo "== a new commit is a genuinely new measurement =="
 python3 pair.py --head "$T/head_fixed.json" --baseline "$T/baseline.json" \
-  --manifest cases.manifest.json --quarantine "$T/q_healthy.json" \
+  --manifest "$T/manifest.json" --quarantine "$T/q_healthy.json" \
   --head-sha head-sha-2 --baseline-sha base-sha --out "$T/pairing_new.json" >/dev/null 2>&1
 python3 gate.py "$T/pairing_new.json" --cache-db "$T/v.db" >"$T/gate3.log" 2>&1
 rc=$?
@@ -95,7 +102,7 @@ rc=$?
 
 echo "== guardrail B: the real 12-case suite cannot see -5pp, so it must not block =="
 python3 pair.py --head "$T/head.json" --baseline "$T/baseline.json" \
-  --manifest cases.manifest.json --quarantine quarantine.json \
+  --manifest "$T/manifest.json" --quarantine quarantine.json \
   --head-sha head-sha-3 --baseline-sha base-sha --out "$T/pairing_weak.json" >/dev/null 2>&1
 python3 gate.py "$T/pairing_weak.json" >"$T/gate4.log" 2>&1
 rc=$?
@@ -108,11 +115,20 @@ echo "== contract drift is refused, not measured =="
 python3 - "$T/head.json" "$T/drifted.json" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
-d["config"]["tests"][0]["assert"][0]["value"] = "something else entirely"
+# Mutate the RESOLVED test on the rows, which is what editing a case file
+# actually produces -- promptfoo re-runs and every row carries the new assert.
+# Mutating config.tests alone would not do it: the published promptfoo leaves
+# that key as raw file:// strings, which is the bug this pairing was fixed for.
+for r in d["results"]["results"]:
+    if (r.get("testCase", {}).get("vars") or {}).get("case_id") == "refund-window":
+        r["testCase"]["assert"][0]["value"] = "something else entirely"
+t = d["config"].get("tests")
+if isinstance(t, list) and t and isinstance(t[0], dict):
+    t[0]["assert"][0]["value"] = "something else entirely"
 json.dump(d, open(sys.argv[2], "w"))
 PY
 python3 pair.py --head "$T/drifted.json" --baseline "$T/baseline.json" \
-  --manifest cases.manifest.json --head-sha d1 --baseline-sha base-sha \
+  --manifest "$T/manifest.json" --head-sha d1 --baseline-sha base-sha \
   --out "$T/pairing_drift.json" >/dev/null 2>&1
 python3 gate.py "$T/pairing_drift.json" >"$T/gate5.log" 2>&1
 rc=$?

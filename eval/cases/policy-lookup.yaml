@@ -1,0 +1,356 @@
+# policy-lookup -- direct factual lookups, one per section of policy.md.
+#
+# Each assertion anchors on the FACT (number, tier, settings path), never on a
+# sentence, word order, markdown or politeness. Every "fails when" names the one
+# wrong behaviour the assertion set was checked by hand to reject.
+#
+# Two cases use llm-rubric (pl-047, pl-056) because they are the only ones whose
+# failure is a SWAP: "Starter $49 / Team $19" and "nonprofit 50% / education 30%"
+# both contain every string a correct answer contains, so no string check can
+# tell them apart. llm-rubric needs a judge pinned in
+# defaultTest.options.provider in promptfooconfig.yaml.
+
+# fails when: quotes the Team price for Starter, or answers without the number
+- vars: {case_id: pl-001, question: "how much is the Starter plan per seat?"}
+  assert:
+    - {type: icontains-any, value: ["$19", "19 per seat", "19 USD", "19/seat"]}
+    - {type: not-icontains, value: "$49"}
+
+# fails when: quotes the Starter price for Team, or answers without the number
+- vars: {case_id: pl-002, question: "Whats the monthly price per user on Team?"}
+  assert:
+    - {type: icontains-any, value: ["$49", "49 per seat", "49 per user", "49 USD"]}
+    - {type: not-icontains, value: "$19"}
+
+# fails when: invents a list price for Enterprise instead of "custom, quoted by sales"
+- vars: {case_id: pl-003, question: "How much does Enterprise cost?"}
+  assert:
+    - {type: icontains-any, value: ["custom", "quoted", "quote", "sales"]}
+    - {type: not-regex, value: '\$\s?\d'}
+
+# fails when: states a discount other than 2 months free (e.g. "20% off", "3 months free")
+- vars: {case_id: pl-004, question: "if i pay for a year up front do i get a discount"}
+  assert:
+    - {type: icontains-any, value: ["2 months free", "two months free", "pay for 10", "10 months"]}
+    - {type: not-icontains, value: "3 months free"}
+
+# fails when: names only one currency, or invents one we do not bill in
+- vars: {case_id: pl-005, question: "What currencies can I be billed in?"}
+  assert:
+    - {type: icontains-any, value: ["USD", "US dollar"]}
+    - {type: icontains-any, value: ["EUR", "euro"]}
+    - {type: icontains-any, value: ["GBP", "pound"]}
+
+# fails when: says the listed prices already include tax
+- vars: {case_id: pl-006, question: "Are the prices on your site inclusive of tax?"}
+  assert:
+    - {type: icontains-any, value: ["exclude", "excluding", "do not include", "does not include", "before tax", "plus tax"]}
+
+# fails when: omits the 30 day notice, or says the new price applies immediately
+- vars: {case_id: pl-007, question: "How much notice do you give before a price increase, and does it hit me right away?"}
+  assert:
+    - {type: icontains-any, value: ["30 days", "30-day", "thirty days"]}
+    - {type: icontains-any, value: ["grandfather", "current term", "remainder of", "rest of your term"]}
+
+# fails when: offers monthly billing on Enterprise
+- vars: {case_id: pl-008, question: "We want Enterprise but we budget monthly. Can we be billed monthly on Enterprise?"}
+  assert:
+    - {type: icontains-any, value: ["annual only", "annually only", "annual-only", "only annual", "annual billing only", "billed annually"]}
+
+# fails when: states a trial length other than 14 days
+- vars: {case_id: pl-009, question: "how long is the free trial"}
+  assert:
+    - {type: icontains-any, value: ["14 days", "14-day", "fourteen days"]}
+    - {type: not-icontains, value: "30 days"}
+
+# fails when: says a card is required to start the trial
+- vars: {case_id: pl-010, question: "do i need to put a credit card in to start the trial?"}
+  assert:
+    - {type: icontains-any, value: ["no card", "no credit card", "without a card", "without a credit card", "not required", "don't need", "do not need", "no payment"]}
+
+# fails when: says the trial gives Starter (or Enterprise) features instead of Team
+- vars: {case_id: pl-011, question: "Which plan's features do I actually get while I'm trialling?"}
+  assert:
+    - {type: icontains, value: "Team"}
+    - {type: not-icontains, value: "Enterprise"}
+
+# fails when: grants or offers a trial extension
+- vars: {case_id: pl-012, question: "Our eval ran long. Can we get another week on the trial?"}
+  assert:
+    - {type: icontains-any, value: ["not extendable", "cannot be extended", "can't be extended", "no extensions", "cannot extend", "can't extend", "isn't extendable", "not able to extend"]}
+
+# fails when: answers only one of the two parts (length, card)
+- vars: {case_id: pl-013, question: "Two things: how many days is the trial, and do you need card details up front?"}
+  assert:
+    - {type: icontains-any, value: ["14 days", "14-day", "fourteen days"]}
+    - {type: icontains-any, value: ["no card", "no credit card", "without a card", "not required", "don't need", "do not need"]}
+
+# fails when: states a refund window other than 30 days
+- vars: {case_id: pl-014, question: "whats your refund window"}
+  assert:
+    - {type: icontains-any, value: ["30 days", "30-day", "thirty days"]}
+    - {type: not-icontains, value: "14 days"}
+
+# fails when: promises a refund outside the 30 day window, or claims to have issued one
+- vars: {case_id: pl-015, question: "I signed up back in June and I want my money back. I'm done with this."}
+  assert:
+    - {type: icontains-any, value: ["no refunds", "not eligible", "cannot be refunded", "can't be refunded", "outside", "after 30 days", "past the 30", "beyond the 30", "no longer"]}
+    - {type: icontains, value: "credit"}
+    - {type: icontains-any, value: ["human", "a person", "our team", "support team", "escalate", "pass this", "pass your", "route"]}
+    - {type: not-regex, value: '[Ii] (have |ve )?(issued|processed|approved|refunded)'}
+
+# fails when: invents a cancellation path that is not Settings > Billing > Cancel plan
+- vars: {case_id: pl-016, question: "where do i cancel my plan"}
+  assert:
+    - {type: icontains-all, value: ["Settings", "Billing", "Cancel plan"]}
+
+# fails when: promises a refund or proration for the already-paid period
+- vars: {case_id: pl-017, question: "If I cancel today do I get refunded for the rest of the month I already paid for?"}
+  assert:
+    - {type: icontains-any, value: ["does not refund", "doesn't refund", "no refund", "not refund", "will not be refunded", "not receive a refund", "past charges"]}
+
+# fails when: says billing continues after cancellation
+- vars: {case_id: pl-018, question: "Does cancelling stop future charges or do I keep getting billed?"}
+  assert:
+    - {type: icontains-any, value: ["stops future charges", "stop future charges", "no further charges", "no future charges", "not be billed again"]}
+
+# fails when: says added seats are billed on the next invoice rather than immediately
+- vars: {case_id: pl-019, question: "We're adding 4 seats next week. When do we get charged for them?"}
+  assert:
+    - {type: icontains-any, value: ["immediately", "right away", "at the time", "as soon as"]}
+    - {type: icontains-any, value: ["prorated", "pro-rated", "pro rata"]}
+
+# fails when: promises a refund for removed seats instead of a credit on the next invoice
+- vars: {case_id: pl-020, question: "what happens to the money if we remove seats mid cycle"}
+  assert:
+    - {type: icontains, value: "credit"}
+    - {type: icontains-any, value: ["next invoice", "next bill"]}
+
+# fails when: says mid-term seats are charged at full price
+- vars: {case_id: pl-021, question: "Adding seats mid-term - is it prorated or full price?"}
+  assert:
+    - {type: icontains-any, value: ["prorated", "pro-rated", "pro rata"]}
+
+# fails when: invents an invoice location other than Billing > Invoice history
+- vars: {case_id: pl-022, question: "where can i download last quarters invoices"}
+  assert:
+    - {type: icontains-all, value: ["Billing", "Invoice history"]}
+
+# fails when: points at the wrong screen, or implies the VAT number applies to past invoices
+- vars: {case_id: pl-023, question: "Where do I put our VAT number so it shows on invoices?"}
+  assert:
+    - {type: icontains, value: "Billing Details"}
+    - {type: icontains-any, value: ["future invoice", "going forward", "from now on"]}
+
+# fails when: agrees to re-issue past invoices with the VAT number
+- vars: {case_id: pl-024, question: "I just added our VAT ID. Can you re-issue the last three invoices with it on them?"}
+  assert:
+    - {type: icontains-any, value: ["can't", "cannot", "not possible", "unable", "won't", "will not", "only appear", "not applied retroactively", "future invoices only"]}
+    - {type: icontains-any, value: ["future invoice", "going forward"]}
+
+# fails when: says card payment needs a higher tier than Starter
+- vars: {case_id: pl-025, question: "Can I pay by card on the Starter plan?"}
+  assert:
+    - {type: icontains-any, value: ["yes", "all plans", "is accepted", "is available"]}
+
+# fails when: refuses ACH to a US customer on Team
+- vars: {case_id: pl-026, question: "Do you accept ACH? We're a US company on the Team plan."}
+  assert:
+    - {type: icontains-any, value: ["yes", "ACH is available", "accepted", "is supported"]}
+
+# fails when: omits that wire is Enterprise-only and annual-only
+- vars: {case_id: pl-027, question: "Can we pay by wire transfer?"}
+  assert:
+    - {type: icontains, value: "Enterprise"}
+    - {type: icontains-any, value: ["annual", "annually"]}
+
+# fails when: offers wire transfer on the Team plan
+- vars: {case_id: pl-028, question: "We're on Team and finance wants to pay by wire transfer. Possible?"}
+  assert:
+    - {type: icontains, value: "Enterprise"}
+    - {type: icontains-any, value: ["only", "not available", "isn't available", "not an option", "cannot", "can't"]}
+
+# fails when: offers ACH to a non-US customer
+- vars: {case_id: pl-029, question: "We're a German company on Team, can we pay by ACH?"}
+  assert:
+    - {type: icontains-any, value: ["US customers", "U.S. customers", "United States", "US-based", "US only"]}
+    - {type: icontains-any, value: ["only", "not available", "isn't available", "cannot", "can't", "no,"]}
+
+# fails when: states a retry count or window other than 3 retries over 7 days
+- vars: {case_id: pl-030, question: "my card got declined. how many times will you try again and over what period?"}
+  assert:
+    - {type: regex, value: '(?:retr(?:y|ies|ied)|attempts?)[^.\n]{0,30}\b(?:3|three)\b|\b(?:3|three)\b[^.\n]{0,30}(?:retr(?:y|ies|ied)|attempts?)'}
+    - {type: icontains-any, value: ["7 days", "seven days", "day 7"]}
+
+# fails when: says the account is suspended, closed or deleted rather than read-only
+- vars: {case_id: pl-031, question: "What actually happens to my account if the payment keeps failing?"}
+  assert:
+    - {type: icontains-any, value: ["read-only", "read only"]}
+
+# fails when: states a read-only retention other than 60 days
+- vars: {case_id: pl-032, question: "If my account goes read-only, how long do I have before you delete our data?"}
+  assert:
+    - {type: icontains-any, value: ["60 days", "sixty days"]}
+    - {type: not-icontains, value: "30 days"}
+
+# fails when: tells the customer to email support instead of naming Settings > Data export
+- vars: {case_id: pl-033, question: "how do i export my data"}
+  assert:
+    - {type: icontains-all, value: ["Settings", "Data export"]}
+
+# fails when: names an export format we do not offer, or omits one of the two
+- vars: {case_id: pl-034, question: "What file formats does the data export come in?"}
+  assert:
+    - {type: icontains, value: "CSV"}
+    - {type: icontains, value: "JSON"}
+
+# fails when: says export is a paid add-on or needs a tier above Starter
+- vars: {case_id: pl-035, question: "Is data export a paid add-on or is it included on Starter?"}
+  assert:
+    - {type: icontains-any, value: ["all plans", "every plan", "included on Starter", "included on all", "yes"]}
+
+# fails when: implies deletion is reversible, or omits the 30 day removal
+- vars: {case_id: pl-036, question: "If I delete my account can I get it back later? And how long until the data is actually gone?"}
+  assert:
+    - {type: icontains-any, value: ["permanent", "cannot be recovered", "can't be recovered", "not recoverable", "irreversible", "cannot be undone"]}
+    - {type: icontains-any, value: ["30 days", "thirty days"]}
+
+# fails when: says SAML SSO is available below Enterprise
+- vars: {case_id: pl-037, question: "Do you support SAML single sign-on, and on which plan?"}
+  assert:
+    - {type: icontains, value: "Enterprise"}
+    - {type: icontains-any, value: ["only", "requires", "exclusive"]}
+
+# fails when: omits that SCIM needs SAML live, or offers it below Enterprise
+- vars: {case_id: pl-038, question: "We need SCIM provisioning. What do we need in place before we can turn it on?"}
+  assert:
+    - {type: icontains-any, value: ["SAML", "SSO", "single sign-on"]}
+    - {type: icontains, value: "Enterprise"}
+
+# fails when: walks a Team customer through enabling SSO
+- vars: {case_id: pl-039, question: "We're on the Team plan and want to enable SSO. How do we do that?"}
+  assert:
+    - {type: icontains, value: "Enterprise"}
+    - {type: icontains-any, value: ["only", "not available", "cannot", "can't", "upgrade"]}
+
+# fails when: quotes another plan's response time to a Starter customer
+- vars: {case_id: pl-040, question: "We're on Starter. How fast do you reply to a support ticket?"}
+  assert:
+    - {type: icontains-any, value: ["next business day", "next working day", "1 business day", "one business day"]}
+    - {type: not-icontains, value: "8 business hours"}
+
+# fails when: quotes another plan's response time to a Team customer
+- vars: {case_id: pl-041, question: "whats the first response time on Team"}
+  assert:
+    - {type: icontains-any, value: ["8 business hours", "eight business hours", "8 hours"]}
+    - {type: not-icontains, value: "next business day"}
+
+# fails when: quotes a sev1 first response other than 1 hour
+- vars: {case_id: pl-042, question: "Enterprise here - if we file a sev1 in the middle of the night, how long until someone responds?"}
+  assert:
+    - {type: icontains-any, value: ["1 hour", "one hour", "60 minutes", "within an hour"]}
+    - {type: not-icontains, value: "8 business hours"}
+
+# fails when: quotes the education rate, or an invented rate, for a nonprofit
+- vars: {case_id: pl-043, question: "We're a registered nonprofit. Do you do a discount?"}
+  assert:
+    - {type: icontains, value: "30%"}
+
+# fails when: quotes the nonprofit rate, or an invented rate, for education
+- vars: {case_id: pl-044, question: "im a teacher, is there an education discount"}
+  assert:
+    - {type: icontains, value: "50%"}
+
+# fails when: agrees to stack the nonprofit and education discounts
+- vars: {case_id: pl-045, question: "We're a nonprofit AND a school. Can we combine both discounts?"}
+  assert:
+    - {type: icontains-any, value: ["do not stack", "don't stack", "cannot be combined", "can't be combined", "not stackable", "only one discount", "cannot stack", "can't stack", "one discount"]}
+
+# fails when: says no documentation is needed to get the nonprofit rate
+- vars: {case_id: pl-046, question: "Do I need to send you anything to get the nonprofit rate?"}
+  assert:
+    - {type: icontains-any, value: ["documentation", "document", "proof", "verification", "evidence"]}
+
+# fails when: swaps the two prices, or answers with only one of them
+- vars: {case_id: pl-047, question: "Hey quick one - Starter and Team prices please, per seat per month."}
+  assert:
+    - {type: icontains-any, value: ["$19", "19 per seat", "19 USD"]}
+    - {type: icontains-any, value: ["$49", "49 per seat", "49 USD"]}
+    - {type: llm-rubric, value: "The answer gives $19 per seat per month as the STARTER price and $49 per seat per month as the TEAM price. Fail if the two prices are attached to the wrong plans, or if either plan is missing a price."}
+
+# fails when: confirms the customer's wrong 30 day trial instead of correcting it to 14
+- vars: {case_id: pl-048, question: "Can you confirm the trial is 30 days? That's what your sales rep told me."}
+  assert:
+    - {type: icontains-any, value: ["14 days", "14-day", "fourteen days"]}
+    - {type: icontains-any, value: ["actually", "not 30", "isn't 30", "incorrect", "not correct", "not quite", "rather than 30", "instead of 30"]}
+
+# fails when: accepts the customer's wrong 7 day refund window instead of correcting it to 30
+- vars: {case_id: pl-049, question: "I read that refunds are only available in the first 7 days, is that right?"}
+  assert:
+    - {type: icontains-any, value: ["30 days", "30-day", "thirty days"]}
+    - {type: icontains-any, value: ["incorrect", "not correct", "not right", "actually", "isn't right", "not accurate", "not 7", "that's wrong"]}
+
+# fails when: agrees that annual billing gives 3 months free
+- vars: {case_id: pl-050, question: "So annual billing gets me 3 months free right?"}
+  assert:
+    - {type: icontains-any, value: ["2 months", "two months"]}
+    - {type: icontains-any, value: ["incorrect", "not correct", "actually", "not 3", "isn't 3", "not quite", "that's wrong"]}
+
+# fails when: confirms the customer's wrong claim that SSO is on Team
+- vars: {case_id: pl-051, question: "Someone told me SSO is available on Team now. Is that true?"}
+  assert:
+    - {type: icontains, value: "Enterprise"}
+    - {type: icontains-any, value: ["not true", "incorrect", "not correct", "isn't true", "no,", "not available on Team", "not accurate"]}
+
+# fails when: states the wrong retry count or the wrong retry schedule
+- vars: {case_id: pl-052, question: "How many payment retry attempts do I get, and what days do they land on?"}
+  assert:
+    - {type: regex, value: '(?:retr(?:y|ies|ied)|attempts?)[^.\n]{0,30}\b(?:3|three)\b|\b(?:3|three)\b[^.\n]{0,30}(?:retr(?:y|ies|ied)|attempts?)'}
+    - {type: icontains-any, value: ["day 1", "days 1"]}
+    - {type: icontains-any, value: ["day 7", "and 7", "7 days", "seven days"]}
+
+# fails when: says the new price applies before the current term ends
+- vars: {case_id: pl-053, question: "Our renewal is coming up. If you raise prices am I stuck paying the new rate immediately or does my current term stay put?"}
+  assert:
+    - {type: icontains-any, value: ["grandfather", "current term", "remainder of", "rest of your term"]}
+    - {type: icontains-any, value: ["30 days", "30-day", "thirty days"]}
+
+# fails when: offers a one-off trial extension
+- vars: {case_id: pl-054, question: "Is the trial extendable at all, even once?"}
+  assert:
+    - {type: icontains-any, value: ["not extendable", "cannot be extended", "can't be extended", "no extensions", "cannot extend", "can't extend", "isn't extendable", "not able to extend"]}
+
+# fails when: gives a vague answer instead of the exact Settings > Billing > Cancel plan path
+- vars: {case_id: pl-055, question: "What's the exact menu path to cancel, I can't find it anywhere in the app"}
+  assert:
+    - {type: icontains-all, value: ["Settings", "Billing", "Cancel plan"]}
+
+# fails when: swaps the two rates (nonprofit 50% / education 30%)
+- vars: {case_id: pl-056, question: "Whats the discount % for nonprofits vs education?"}
+  assert:
+    - {type: icontains, value: "30%"}
+    - {type: icontains, value: "50%"}
+    - {type: llm-rubric, value: "The answer states 30% as the NONPROFIT discount and 50% as the EDUCATION discount. Fail if the two percentages are attached to the wrong category."}
+
+# fails when: offers ACH on the Starter plan
+- vars: {case_id: pl-057, question: "quick sanity check: is ACH available on Starter?"}
+  assert:
+    - {type: icontains-any, value: ["Team", "Enterprise"]}
+    - {type: icontains-any, value: ["not available", "isn't available", "no,", "cannot", "can't", "only", "requires"]}
+
+# fails when: answers the cancel path but not the refund question (or promises the refund)
+- vars: {case_id: pl-058, question: "I want to leave. Where's cancel, and does that refund the charge from last week?"}
+  assert:
+    - {type: icontains-all, value: ["Settings", "Billing", "Cancel plan"]}
+    - {type: icontains-any, value: ["does not refund", "doesn't refund", "no refund", "not refund", "will not be refunded", "not receive a refund", "past charges"]}
+
+# fails when: quotes the 60 day read-only retention instead of the 30 day post-deletion removal
+- vars: {case_id: pl-059, question: "How long do you keep our data after we delete the account?"}
+  assert:
+    - {type: icontains-any, value: ["30 days", "thirty days"]}
+    - {type: not-icontains, value: "60 days"}
+
+# fails when: says the trial runs on Starter features
+- vars: {case_id: pl-060, question: "Does the trial come with Starter features or Team features? Need to know before we evaluate."}
+  assert:
+    - {type: icontains, value: "Team"}

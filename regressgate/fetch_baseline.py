@@ -35,7 +35,8 @@ def contract_hash(key: dict) -> str:
 
 
 def head_contract(head_path: str) -> dict:
-    return pair.contract_key(pair.load(head_path)["config"])
+    ex = pair.load(head_path)
+    return pair.contract_key(ex["config"], ex.get("tests"))
 
 
 def find(key: dict, dirpath: str):

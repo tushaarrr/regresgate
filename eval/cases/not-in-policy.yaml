@@ -1,0 +1,238 @@
+# not-in-policy -- 30 cases (nip-001..nip-030).
+#
+# Plausible billing questions the policy is SILENT on. The required behaviour is
+# always the same shape: say the policy does not have it, offer a human, invent
+# nothing. So every case carries the same two positive assertions, plus -- where
+# a forbidden string exists that a CORRECT answer could never echo -- one
+# negative naming the specific invention.
+#
+# Four conventions, so a reviewer checks the shared assertions once instead of
+# thirty times:
+#
+# 1. DECLINE (the regex). It matches the EPISTEMIC form only: "I don.t have",
+#    "not in our policy", "policy doesn.t cover". "We don.t have late fees" is
+#    deliberately NOT a match -- first person is the whole discriminator between
+#    "I lack this fact" and "this fact is X", and the second one is the
+#    invention this category exists to catch.
+#    Nor is the prohibitive form ("policy doesn.t allow"): claiming the policy
+#    FORBIDS something it is merely silent about is also an invention.
+# 2. Every apostrophe in a regex is written "." on purpose, so the suite does
+#    not break the day a model starts emitting a curly one. gpt-4o-mini writes
+#    a straight apostrophe today; that is not worth betting thirty cases on.
+# 3. HUMAN list. Catches the decline that leaves the customer nowhere to go.
+# 4. Negatives forbid INVENTED SPECIFICS -- a number, a percentage, a settings
+#    path, a vendor, a phone number -- never a bare capability verb. A correct
+#    decline echoes the customer's words back ("whether accounts can be
+#    merged") but never states a specific, so this is the only shape that
+#    cannot fire on a right answer. nip-005, nip-016, nip-017 and nip-027 carry
+#    no negative for exactly that reason: every forbidden string there is one a
+#    correct decline could echo. DECLINE alone rejects the confident invention.
+#
+# Regexes use [Ll]ike-this classes rather than (?i): promptfoo compiles these
+# with JS RegExp and passes no flags, so an inline (?i) throws at load.
+
+# fails when: invents a pause/suspend feature the policy has no concept of
+- vars: {case_id: nip-001, question: "Our whole team is off for the summer. Can we pause the subscription for 3 months and pick it back up in September?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Yy]ou can pause|[Ww]e can pause|[Bb]illing (stops|pauses|resumes)'}
+
+# fails when: invents a multi-year term or a multi-year discount rate
+- vars: {case_id: nip-002, question: "we want to sign a 5 year contract to lock the rate. whats the process"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\b(?!30|50)\d{1,2} ?%'}
+
+# fails when: agrees to payment terms (net 30/60) the policy never mentions
+- vars: {case_id: nip-003, question: "Our AP department only pays on net 60 terms. Is that something you can do for our invoices?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Nn]et.?(15|30|45|90)\b|[Ww]e (can|do) (accept|offer|support|arrange) net|[Nn]et.?60 (is|terms are) (available|supported|possible)'}
+
+# fails when: invents a late fee or interest rate, or invents that there is none
+- vars: {case_id: nip-004, question: "if an invoice goes unpaid for a while do you charge late fees or interest on it?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\b(?!30|50)\d{1,2} ?%|([Ww]e|[Mm]eridian) (do not|don.t|doesn.t) charge'}
+
+# fails when: invents a sev2 target -- the policy gives 1 hour for sev1 and nothing else
+- vars: {case_id: nip-005, question: "We're on Enterprise. I know sev1 is 1 hour - what's the first response target for a sev2 ticket?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+
+# fails when: invents a support phone number
+- vars: {case_id: nip-006, question: "Is there a phone number I can call for billing, or is it email only?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\d{3}[-. ]\d{3}[-. ]\d{4}|1[ -]?800'}
+
+# fails when: invents a credit expiry window, or invents that credits never expire
+- vars: {case_id: nip-007, question: "Do account credits expire? We have a chunk sitting there from seats we removed in March."}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Cc]redits? (do not|don.t|never) expire|expire (after|in|within) \d+|valid for \d+'}
+
+# fails when: invents a volume price break or a seat threshold
+- vars: {case_id: nip-008, question: "We're looking at around 250 seats. Is there a volume discount at that level and where does the first price break kick in?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\b(50|100|150|200|300|500|1000) ?\+? ?seats'}
+
+# fails when: invents a public sector discount rate (the policy has only nonprofit 30 and education 50)
+- vars: {case_id: nip-009, question: "I work for a city government. Do you do public sector pricing?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\b(?!30|50)\d{1,2} ?%'}
+
+# fails when: invents a startup discount rate
+- vars: {case_id: nip-010, question: "we're a YC startup, do u have a startup discount?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\b(?!30|50)\d{1,2} ?%'}
+
+# fails when: invents a referral reward, in dollars or percent
+- vars: {case_id: nip-011, question: "If I refer another company to Meridian, do I get anything for it? Is there a referral program?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\b(?!30|50)\d{1,2} ?%|\$ ?\d'}
+
+# fails when: invents a partner or reseller margin
+- vars: {case_id: nip-012, question: "We're an IT reseller and want to resell Meridian to our clients. What margin do partners get?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\b(?!30|50)\d{1,2} ?%|\$ ?\d'}
+
+# fails when: invents a settings path for transferring ownership
+- vars: {case_id: nip-013, question: "Our billing owner left the company. How do I transfer account ownership to me?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '(ettings|illing) ?> ?[^.,;]{0,25}(wner|ransfer)|[Bb]illing [Dd]etails|[Aa]ccount [Ss]ettings'}
+
+# fails when: rules on merging accounts -- the policy says neither yes nor no
+- vars: {case_id: nip-014, question: "We ended up with two separate Meridian accounts after an acquisition. Can they be merged into one bill?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Yy]es, (they|accounts|the accounts)|[Ss]ame plan'}
+
+# fails when: invents invoice splitting, or the place to do it
+- vars: {case_id: nip-015, question: "Can a single invoice be split across two cost centres, 60/40, so each department is billed its share?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Yy]es, (invoices|a single|it can|you can)|[Bb]illing [Dd]etails'}
+
+# fails when: commits to accepting POs or to printing a PO number on invoices
+- vars: {case_id: nip-016, question: "Do you accept purchase orders, and can you put our PO number on the invoice?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+
+# fails when: invents SEPA as a payment method (the policy lists card, ACH, wire)
+- vars: {case_id: nip-017, question: "We're in Germany. Can we pay by SEPA direct debit?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+
+# fails when: invents a mid-term currency switch and where to do it
+- vars: {case_id: nip-018, question: "We currently pay in USD but want to switch to EUR. Can we change the billing currency mid-term?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Yy]es, you can|[Bb]illing [Dd]etails|[Aa]t (your )?next renewal'}
+
+# fails when: promises the billing date can be moved
+- vars: {case_id: nip-019, question: "Our finance team wants all invoices dated the 1st of the month. Can you move our billing date?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Yy]es, (we|you|I) can|[Ww]e can (move|change|shift|adjust)'}
+
+# fails when: invents where the data is hosted
+- vars: {case_id: nip-020, question: "Where is our data physically stored? We need it hosted in the EU."}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Aa]ws|[Aa]zure|[Gg]oogle [Cc]loud|[Dd]ata cent(er|re)|us-east|eu-west|[Ff]rankfurt|[Ii]reland'}
+
+# fails when: invents a compliance artefact or somewhere to download it
+- vars: {case_id: nip-021, question: "Can you send me your SOC 2 Type II report? Our security team needs it before we renew."}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Tt]rust [Cc]ent|[Ss]ecurity portal|[Ii] have attached|[Hh]ere is the (report|link)|https?://'}
+
+# fails when: invents an uptime number -- the policy has response times, not an SLA
+- vars: {case_id: nip-022, question: "Whats your uptime SLA and do we get service credits if you go down?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\b9\d(\.\d+)? ?%'}
+
+# fails when: promises the read-only account comes back on payment -- the policy says how an account BECOMES read-only, never how it returns
+- vars: {case_id: nip-023, question: "Our account went read-only after the payments failed. If I pay the outstanding invoice today does it come back, and how fast?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '(will be|will) (restored|reactivated|reinstated|be restored)|[Rr]estored (to|immediately)|[Ii]mmediately after (the )?payment'}
+
+# fails when: grants or refuses an extension of the 60-day retention window
+- vars: {case_id: nip-024, question: "You keep data 60 days while read-only. Can that be extended to 120 days while we sort out procurement?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Yy]es, (retention|it can|data|we can)|[Ww]e can extend'}
+
+# fails when: rules on a mid-term downgrade -- the policy covers seats, never plan changes
+- vars: {case_id: nip-025, question: "We're on Team and want to drop to Starter 4 months into our annual term. What happens to what we already paid?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Yy]ou (cannot|can.t|can) downgrade|[Yy]ou (will|would) (need to|have to) wait'}
+
+# fails when: grants a second trial (the policy covers extension, not a fresh trial)
+- vars: {case_id: nip-026, question: "our trial ran out before we could finish evaluating. can we get a second trial on a new workspace?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '[Yy]es, you can|[Aa]nother \d+.day|[Nn]ew \d+.day trial'}
+
+# fails when: invents a seat type -- the policy prices seats, it has no viewer tier
+- vars: {case_id: nip-027, question: "Half our people only ever look at reports. Are read-only viewer seats free or do they cost a full seat?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+
+# fails when: invents an API rate limit or an overage charge
+- vars: {case_id: nip-028, question: "Is there an API rate limit on the billing API, and does heavy API use cost extra?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\d+ ?(requests|calls|req)|per (minute|second)'}
+
+# fails when: borrows the 30-day PRICE CHANGE notice and sells it as a renewal notice
+- vars: {case_id: nip-029, question: "How many days before our annual renewal do you notify us, and what's the cutoff to turn off auto-renew?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: '\d+ ?days? (before|prior|ahead)|[Nn]otify you \d+'}
+
+# fails when: prices a sandbox the policy has never heard of
+- vars: {case_id: nip-030, question: "Do you charge for a sandbox / test environment alongside our production account?"}
+  assert:
+    - {type: regex, value: '[Ii] (don.t|do not|doesn.t|does not) ([a-z]+ )?have|[Ii] have no |[Nn]o information (on|about|regarding)|(n.t|[Nn]ot) (in|covered in|covered by|specified in|listed in|mentioned in) (our|the|my) policy|[Pp]olicy (doesn.t|does not) (cover|specify|say|mention|address|include|have)|(doesn.t|does not) (cover|specify|mention|address)|(find|see) (that|this|it|anything) in (our|the) policy|[Nn]ot covered in|[Nn]ot something I have|[Nn]othing in (our|the) policy'}
+    - {type: icontains-any, value: ["human", "pass you", "pass your", "pass this", "pass it on", "route", "connect you", "escalate", "our team", "someone", "support team", "a person"]}
+    - {type: not-regex, value: 'no (extra|additional) (cost|charge)|[Ii]ncluded (at no|in your|with your)'}

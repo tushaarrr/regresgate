@@ -82,11 +82,40 @@ def sha(obj) -> str:
 # --------------------------------------------------------------------------- #
 # contract key -- what must match before a delta means anything
 # --------------------------------------------------------------------------- #
-def _tests(cfg) -> list[dict]:
+def tests_from_rows(raw_rows) -> list[dict]:
+    """The tests that ACTUALLY RAN, taken from each row's `testCase`.
+
+    MEASURED, and it silently broke the contract key: the PUBLISHED promptfoo
+    0.123.1 leaves `tests: [file://cases/a.yaml, ...]` in the export as RAW
+    STRINGS, while the git checkout resolves them into dicts. Hashing
+    config.tests therefore hashed an empty list -- every suite got the same
+    dataset_sha, `n_cases_expected` came out 0, and two completely different
+    golden sets compared as one contract. No error, no warning.
+
+    row.testCase is the resolved test (vars, assert, options), so hash what
+    ran rather than what was declared. That is the better question anyway:
+    a case that was filtered out did not participate in the measurement.
+    """
+    out = {}
+    for r in raw_rows:
+        tc = r.get("testCase")
+        if not isinstance(tc, dict):
+            continue
+        cid = (tc.get("vars") or {}).get("case_id")
+        # One entry per case: --repeat N gives N rows carrying the same test.
+        out.setdefault(cid, {"vars": tc.get("vars"), "assert": tc.get("assert"),
+                             "options": tc.get("options")})
+    return list(out.values())
+
+
+def _tests(cfg, tests=None) -> list[dict]:
+    # `tests` empty means the rows taught us nothing (a zero-row export), not
+    # that the suite is empty -- fall back to the declared config and let the
+    # caller's own emptiness check decide.
+    if tests:
+        return tests
     t = cfg.get("tests")
     if not isinstance(t, list):
-        # An unresolved `tests: file://...` means the export cannot tell us what
-        # ran. Refusing beats hashing the string and calling it a golden set.
         raise Integrity(f"config.tests is {type(t).__name__}, not a resolved list")
     return [x for x in t if isinstance(x, dict)]
 
@@ -95,20 +124,20 @@ def _case_id(test: dict):
     return (test.get("vars") or {}).get("case_id")
 
 
-def dataset_sha(cfg) -> str:
+def dataset_sha(cfg, tests=None) -> str:
     """Hash of the golden set: every case_id and the vars that drive it."""
     items = []
-    for t in _tests(cfg):
+    for t in _tests(cfg, tests):
         v = dict(t.get("vars") or {})
         v.pop("case_id", None)
         items.append([_case_id(t), v])
     return sha(sorted(items, key=canon))
 
 
-def assertions_sha(cfg) -> str:
+def assertions_sha(cfg, tests=None) -> str:
     """Hash of what counts as passing. Kept apart from the dataset hash so a
     reviewer can see *which* half of the contract moved."""
-    items = [[_case_id(t), t.get("assert")] for t in _tests(cfg)]
+    items = [[_case_id(t), t.get("assert")] for t in _tests(cfg, tests)]
     return sha([sorted(items, key=canon), cfg.get("defaultTest")])
 
 
@@ -121,10 +150,20 @@ def _assert_types(node) -> list[str]:
     return []
 
 
-def judge_snapshot(cfg) -> str | None:
+def judge_snapshot(cfg, tests=None) -> str | None:
     """The pinned grader, or None. A recorded judge nobody enforced is an
-    intention; this reads the enforcement (`defaultTest.options.provider`)."""
+    intention; this reads the enforcement -- defaultTest.options.provider, or
+    the per-test options promptfoo resolved onto every row."""
     prov = ((cfg.get("defaultTest") or {}).get("options") or {}).get("provider")
+    if not prov:
+        seen = {canon((t.get("options") or {}).get("provider"))
+                for t in (tests or []) if (t.get("options") or {}).get("provider")}
+        if len(seen) == 1:
+            prov = json.loads(seen.pop())
+        elif len(seen) > 1:
+            raise Integrity(f"tests disagree about the judge: {sorted(seen)}; "
+                            "one suite must have one grader or the pass rate "
+                            "is a mix of two measurements")
     if isinstance(prov, dict):
         prov = prov.get("id")
     return prov or os.environ.get("REGRESSGATE_JUDGE") or None
@@ -135,18 +174,25 @@ def pinned_version() -> str:
         return f.read().strip()
 
 
-def contract_key(cfg) -> dict:
-    types = set(_assert_types([t.get("assert") for t in _tests(cfg)]))
+def contract_key(cfg, tests=None) -> dict:
+    resolved = _tests(cfg, tests)
+    if not resolved:
+        # Never hash an empty set into a key that is supposed to identify a
+        # golden set: every suite would collide and the gate would happily
+        # compare two different experiments.
+        raise Integrity("no resolved tests in the export; refusing to build a "
+                        "contract key that would be identical for every suite")
+    types = set(_assert_types([t.get("assert") for t in resolved]))
     types |= set(_assert_types((cfg.get("defaultTest") or {}).get("assert")))
-    judge = judge_snapshot(cfg)
+    judge = judge_snapshot(cfg, resolved)
     if types & MODEL_GRADED and not judge:
         raise Integrity(
             f"suite uses model-graded assertions {sorted(types & MODEL_GRADED)} but no judge "
             "is pinned; llm-rubric would pick its grader from the ambient API keys")
     return {
         "suite": cfg.get("description") or "",
-        "dataset_sha": dataset_sha(cfg),
-        "assertions_sha": assertions_sha(cfg),
+        "dataset_sha": dataset_sha(cfg, resolved),
+        "assertions_sha": assertions_sha(cfg, resolved),
         "judge_snapshot": judge or "none:no-model-graded-assertions",
         "promptfoo_version": pinned_version(),
     }
@@ -159,11 +205,13 @@ def load(path: str) -> dict:
     with open(path) as f:
         doc = json.load(f)
     res = doc.get("results") or {}
-    rows = [parse.normalize_row(r) for r in res.get("results") or []]
+    raw = res.get("results") or []
+    rows = [parse.normalize_row(r) for r in raw]
     stats = res.get("stats") or {}
     return {
         "eval_id": doc.get("evalId"),
         "config": doc.get("config") or {},
+        "tests": tests_from_rows(raw),
         "rows": rows,
         # stats.errors is the contract; the row count is the fallback if a future
         # version drops the key. They must agree, and disagreeing is itself a bug.
@@ -219,10 +267,13 @@ def unscored(rows) -> int:
 # manifest + quarantine
 # --------------------------------------------------------------------------- #
 def build_manifest(head: dict) -> dict:
-    cfg = head["config"]
-    ids = sorted({_case_id(t) for t in _tests(cfg)} - {None})
+    cfg, tests = head["config"], head.get("tests")
+    ids = sorted({_case_id(t) for t in _tests(cfg, tests)} - {None})
+    if not ids:
+        raise Integrity("no case_ids in the export; a manifest of zero cases "
+                        "would make the gate's count check vacuous")
     return {"suite": cfg.get("description") or "", "n_cases_expected": len(ids),
-            "dataset_sha": dataset_sha(cfg), "case_ids": ids}
+            "dataset_sha": dataset_sha(cfg, tests), "case_ids": ids}
 
 
 def read_quarantine(path, n_cases):
@@ -287,7 +338,7 @@ def build(head_path, baseline_path, manifest_path=None, quarantine_path=None,
     try:
         head = load(head_path)
         doc["head"] = {"eval_id": head["eval_id"], "git_sha": git_sha(head_sha),
-                       "contract_key": contract_key(head["config"]),
+                       "contract_key": contract_key(head["config"], head.get("tests")),
                        "errors": head["errors"], "unscored": unscored(head["rows"])}
 
         if manifest_path and os.path.exists(manifest_path):
@@ -304,7 +355,7 @@ def build(head_path, baseline_path, manifest_path=None, quarantine_path=None,
             return doc
         base = load(baseline_path)
         doc["baseline"] = {"eval_id": base["eval_id"], "git_sha": baseline_sha,
-                           "contract_key": contract_key(base["config"]),
+                           "contract_key": contract_key(base["config"], base.get("tests")),
                            "errors": base["errors"], "unscored": unscored(base["rows"])}
         doc["pairs"], doc["coverage"] = make_pairs(base["rows"], head["rows"])
     except Integrity as e:
@@ -425,6 +476,60 @@ def _selfcheck():
         {"vars": {"case_id": "a"}}, {"vars": {"case_id": "b"}}]))}
     c5 = {"description": "s", "tests": [{"vars": {"case_id": "b"}}, {"vars": {"case_id": "a"}}]}
     assert dataset_sha(c4) == dataset_sha(c5)
+
+    # THE REGRESSION TEST FOR THE SILENT CONTRACT-KEY COLLAPSE.
+    # The published promptfoo leaves `tests: [file://...]` as raw strings in
+    # the export. Hashing config.tests then hashed an EMPTY list, so every
+    # suite produced the same dataset_sha and n_cases_expected came out 0 --
+    # a contract key that cannot tell two golden sets apart, failing silently.
+    # The fix reads row.testCase instead; these assertions pin it.
+    def _export(cases, desc="s"):
+        return {"evalId": "e", "config": {"description": desc,
+                                          "tests": ["file://cases/a.yaml"]},
+                "results": {"stats": {"errors": 0}, "results": [
+                    {"testCase": {"vars": {"case_id": c, "q": q},
+                                  "assert": [{"type": "icontains", "value": a}],
+                                  "options": {"provider": "openai:gpt-4o-2024-11-20"}},
+                     "vars": {"case_id": c}, "promptIdx": 0, "success": True,
+                     "gradingResult": {"componentResults": [
+                         {"assertion": {"type": "icontains"}, "pass": True}]}}
+                    for c, q, a in cases]}}
+    import tempfile as _tf
+    def _write(cases, desc="s"):
+        pth = os.path.join(_tf.mkdtemp(), "e.json")
+        with open(pth, "w") as fh:
+            json.dump(_export(cases, desc), fh)
+        return pth
+
+    ex1 = load(_write([("a", "q1", "x"), ("b", "q2", "y")]))
+    assert len(ex1["tests"]) == 2, ex1["tests"]
+    k1 = contract_key(ex1["config"], ex1["tests"])
+    assert k1["judge_snapshot"] == "openai:gpt-4o-2024-11-20", k1
+    # a DIFFERENT golden set must not collide with the first
+    ex2 = load(_write([("a", "q1", "x"), ("c", "q3", "z")]))
+    k2 = contract_key(ex2["config"], ex2["tests"])
+    assert k1["dataset_sha"] != k2["dataset_sha"], "two golden sets collided"
+    # the manifest must count the real cases, never zero
+    m = build_manifest(ex1)
+    assert m["n_cases_expected"] == 2 and m["case_ids"] == ["a", "b"], m
+    # --repeat must not multiply the case count
+    rep = _export([("a", "q1", "x"), ("a", "q1", "x"), ("b", "q2", "y")])
+    pth = os.path.join(_tf.mkdtemp(), "r.json")
+    with open(pth, "w") as fh:
+        json.dump(rep, fh)
+    assert build_manifest(load(pth))["n_cases_expected"] == 2
+    # an export with no resolvable tests must RAISE, never hash an empty set
+    empty = {"evalId": "e", "config": {"description": "s", "tests": ["file://x.yaml"]},
+             "results": {"stats": {"errors": 0}, "results": []}}
+    pth = os.path.join(_tf.mkdtemp(), "empty.json")
+    with open(pth, "w") as fh:
+        json.dump(empty, fh)
+    exE = load(pth)
+    try:
+        contract_key(exE["config"], exE["tests"])
+        raise AssertionError("an empty test set must not produce a contract key")
+    except Integrity as e:
+        assert "identical for every suite" in str(e)
 
     # no quarantine file at all is "unmeasured", not "fine"
     assert read_quarantine(None, 300) == ([], None)

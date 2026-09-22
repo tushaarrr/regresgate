@@ -11,7 +11,7 @@
 #   first response: Starter next business day, Team 8 business hours,
 #     Enterprise 1 hour sev1
 #
-# Two deliberate non-assertions, so nobody "fixes" them later:
+# Three deliberate non-assertions, so nobody "fixes" them later:
 #   1. No case forbids the 12-month figure (e.g. $1,176 for 2 Team seats).
 #      The model routinely shows "49 x 2 x 12 = $1,176, but annual is 10
 #      months, so $980" -- correct working, and forbidding it would fail a
@@ -20,49 +20,54 @@
 #   2. Negatives only name strings that cannot appear in ANY correct answer
 #      (a rate from the other discount tier, a dollar figure on an Enterprise
 #      quote, an invented limit). Everything else is a positive.
+#   3. Money is matched as a bare number with a trailing digit guard --
+#      '245(?!\d)' -- not "$245". That passes "$245", "$245.00" and "245 USD"
+#      but rejects "$2450", so quoting an annual total for a monthly question
+#      cannot sneak through on a substring. The '5,?880' form takes the figure
+#      with or without the thousands comma.
 
 # fails when: quotes the Team price, or the annual seat-year, for a plain
-#             Starter monthly lookup. \b rejects "$190".
+#             Starter monthly lookup. The guard rejects "$190".
 - vars: {case_id: num-001, question: "how much is starter per seat"}
   assert:
-    - {type: regex, value: '\$19\b'}
+    - {type: regex, value: '19(?!\d)'}
 
-# fails when: quotes the Starter price for Team. \b rejects "$490".
+# fails when: quotes the Starter price for Team. The guard rejects "$490".
 - vars: {case_id: num-002, question: "Whats the monthly price of Team for one seat?"}
   assert:
-    - {type: regex, value: '\$49\b'}
+    - {type: regex, value: '49(?!\d)'}
 
 # fails when: invents a per-seat number for Enterprise instead of routing to
 #             sales. Any dollar figure at all is the failure.
 - vars: {case_id: num-003, question: "How much does Enterprise cost per seat per month?"}
   assert:
-    - {type: icontains-any, value: ["quoted by sales", "custom", "sales team", "sales"]}
+    - {type: icontains-any, value: ["quoted by sales", "custom", "sales"]}
     - {type: not-regex, value: '\$\s?\d'}
 
 # fails when: 49 x 12 = $588 -- billing the annual question at twelve months.
 - vars: {case_id: num-004, question: "If I pay for Team annually, what's the cost per seat for the whole year?"}
   assert:
-    - {type: icontains-any, value: ["490", "four hundred ninety"]}
+    - {type: regex, value: '490(?!\d)'}
 
 # fails when: 19 x 12 = $228, or answering with the $19 monthly rate only.
 - vars: {case_id: num-005, question: "starter billed yearly - total per seat for 12 months?"}
   assert:
-    - {type: icontains-any, value: ["190", "one hundred ninety"]}
+    - {type: regex, value: '190(?!\d)'}
 
 # fails when: 3 x 19 x 12 = $684 instead of 3 x 19 x 10.
 - vars: {case_id: num-006, question: "what do I pay for 3 seats for a year on Starter"}
   assert:
-    - {type: icontains-any, value: ["570", "$570.00"]}
+    - {type: regex, value: '570(?!\d)'}
 
 # fails when: 12 x 49 x 12 = $7,056, or answering $588 (one seat-year).
 - vars: {case_id: num-007, question: "12 seats on Team annually — total please"}
   assert:
-    - {type: icontains-any, value: ["5,880", "5880"]}
+    - {type: regex, value: '5,?880(?!\d)'}
 
 # fails when: quotes the annual figure, or per-seat instead of the 5-seat total.
 - vars: {case_id: num-008, question: "We have 5 people on Team, billed monthly. What's the total each month?"}
   assert:
-    - {type: icontains-any, value: ["245", "two hundred forty-five"]}
+    - {type: regex, value: '245(?!\d)'}
 
 # fails when: invents a usage limit. The policy has no API quota anywhere, so
 #             any three-digit number in this answer is a hallucination.
@@ -79,48 +84,48 @@
 # fails when: 8 x 49 x 12 = $4,704.
 - vars: {case_id: num-011, question: "hi there! we're moving 8 seats onto Team and paying yearly. what's the damage?"}
   assert:
-    - {type: icontains-any, value: ["3,920", "3920"]}
+    - {type: regex, value: '3,?920(?!\d)'}
 
 # fails when: answers "2 months free" without doing 588 - 490 = $98.
-#             \b rejects "$980" and "$98x".
+#             The guard rejects "$980".
 - vars: {case_id: num-012, question: "How much do I save per seat per year by paying annually on Team instead of monthly?"}
   assert:
-    - {type: regex, value: '\$98\b'}
+    - {type: regex, value: '98(?!\d)'}
 
 # fails when: 40 x 19 x 12 = $9,120.
 - vars: {case_id: num-013, question: "40 seats, Starter, annual contract. Total?"}
   assert:
-    - {type: icontains-any, value: ["7,600", "7600"]}
+    - {type: regex, value: '7,?600(?!\d)'}
 
 # fails when: stops at 49 x 2 x 12 = $1,176 and never applies 2 months free.
 - vars: {case_id: num-014, question: "just 2 seats on team for a year, how much"}
   assert:
-    - {type: icontains-any, value: ["980", "nine hundred eighty"]}
+    - {type: regex, value: '980(?!\d)'}
 
 # fails when: applies the 30% nonprofit rate ($34.30) to an education customer,
 #             or quotes the undiscounted $49.
 - vars: {case_id: num-015, question: "we qualify for the education discount. what does Team cost per seat per month for us?"}
   assert:
-    - {type: icontains-any, value: ["24.50", "24.5"]}
+    - {type: regex, value: '24\.50?(?!\d)'}
     - {type: not-icontains, value: "34.30"}
 
 # fails when: discounts the 12-month figure (588 x 0.5 = $294) instead of the
 #             10-month seat-year, or returns the monthly $24.50 as the answer.
 - vars: {case_id: num-016, question: "Education discount, Team plan, billed annually. Price per seat for the year?"}
   assert:
-    - {type: icontains-any, value: ["245", "two hundred forty-five"]}
+    - {type: regex, value: '245(?!\d)'}
 
 # fails when: applies 50% ($9.50) instead of the 30% nonprofit rate.
 - vars: {case_id: num-017, question: "nonprofit here — what's Starter per seat monthly after our discount?"}
   assert:
-    - {type: icontains-any, value: ["13.30", "13.3"]}
+    - {type: regex, value: '13\.30?(?!\d)'}
     - {type: not-icontains, value: "9.50"}
 
 # fails when: leaves the arithmetic as a formula ("49 x 10 x 0.7") instead of
 #             stating $343, or discounts 12 months (588 x 0.7 = $411.60).
 - vars: {case_id: num-018, question: "Nonprofit discount on Team annual — per seat per year?"}
   assert:
-    - {type: icontains-any, value: ["343", "three hundred forty-three"]}
+    - {type: regex, value: '343(?!\d)'}
 
 # fails when: adds the two rates to 80% instead of saying discounts do not
 #             stack. "80%" itself is not forbidden -- a correct answer may well
@@ -134,12 +139,12 @@
 #             10 seats, or discounts 12 months (10 x 19 x 12 x 0.5 = $1,140).
 - vars: {case_id: num-020, question: "10 seats, Starter, annual, with the education discount. Total for the year?"}
   assert:
-    - {type: icontains-any, value: ["950", "nine hundred fifty"]}
+    - {type: regex, value: '950(?!\d)'}
 
 # fails when: 20 x 49 = $980 with the discount dropped, or the 50% rate applied.
 - vars: {case_id: num-021, question: "20 seats on Team monthly with the nonprofit discount, what's the monthly bill"}
   assert:
-    - {type: icontains-any, value: ["686", "six hundred eighty-six"]}
+    - {type: regex, value: '686(?!\d)'}
 
 # fails when: answers with the 30-day refund window instead of the trial length.
 - vars: {case_id: num-022, question: "how many days is the trail?"}
@@ -169,7 +174,7 @@
 #             instead of correcting to $19 and answering $190.
 - vars: {case_id: num-026, question: "I'm on Starter at $29 per seat — what's that for a year for 1 seat?"}
   assert:
-    - {type: icontains-any, value: ["190", "one hundred ninety"]}
+    - {type: regex, value: '190(?!\d)'}
     - {type: not-icontains, value: "290"}
 
 # fails when: accepts "3 months free" and bills 4 x 49 x 9 = $1,764.
@@ -177,7 +182,7 @@
 #             right behaviour and may repeat the phrase.
 - vars: {case_id: num-027, question: "I thought annual was 3 months free. 4 seats on Team for the year, what do I owe?"}
   assert:
-    - {type: icontains-any, value: ["1,960", "1960"]}
+    - {type: regex, value: '1,?960(?!\d)'}
     - {type: icontains-any, value: ["2 months", "two months"]}
 
 # fails when: quotes the 30-day deletion window instead of the 60-day

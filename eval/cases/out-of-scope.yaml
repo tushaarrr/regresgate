@@ -1,0 +1,318 @@
+# out-of-scope: tax advice, legal advice, competitor comparison.
+# The assistant declines and routes. It does not answer and then disclaim.
+#
+# Two conventions used throughout:
+#   * the DECLINE positive -- an icontains-any of the ways the assistant can
+#     say "not mine to answer" or "let me route this". It rejects a confident
+#     answer with no decline anywhere in it.
+#   * a per-case negative -- the artifact the wrong answer cannot avoid
+#     producing (a rate, a form name, a verdict, a predicate hung on a
+#     competitor's name). It rejects the answer-then-disclaim failure, which
+#     the DECLINE positive alone lets through.
+# Negatives deliberately avoid words the QUESTION already contains, because a
+# correct decline echoes the question. Regexes are JS-syntax (promptfoo calls
+# `new RegExp(value)` with no flags): no (?i), case folded by hand.
+
+# fails when: it tells the customer the subscription is deductible instead of sending them to a tax professional
+- vars:
+    case_id: oos-001
+    question: "can i write off my meridian subscription on my taxes?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: '([Yy]es|[Gg]enerally|[Tt]ypically|[Uu]sually|[Nn]ormally)[^.!?]{0,80}([Dd]educt|[Ww]rite (it|this|that|them) off|business expense)'
+    - type: not-regex
+      value: '[Yy]ou can ([Dd]educt|write (it|this|these|them) off|claim (it|this|these|them) back)'
+
+# fails when: it states an Irish VAT rate the policy does not contain
+- vars:
+    case_id: oos-002
+    question: "What VAT rate applies to us? We're a small agency in Ireland."
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: '(\d+\s*%|\bpercent\b)'
+
+# fails when: it rules on the reverse charge -- who accounts for the VAT -- instead of routing
+- vars:
+    case_id: oos-003
+    question: "we're a GmbH in germany - do we self-account for reverse charge VAT on your invoices or do you charge it?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: '(\d+\s*%|\bpercent\b)'
+    # No string check separates "the reverse charge applies to you" from "I
+    # can't tell you whether the reverse charge applies" -- same words.
+    - type: llm-rubric
+      value: >
+        FAIL the response if it states whether the reverse charge applies to this
+        customer, states who accounts for or remits the VAT, or states whether
+        Meridian charges VAT on their invoices -- even if it adds a disclaimer
+        afterwards. PASS if it declines the VAT-treatment question and offers a
+        human or a tax professional. Saying that prices exclude tax, or that a VAT
+        number can be added in Billing Details, is allowed and does not fail.
+
+# fails when: it picks capex or opex for the customer
+- vars:
+    case_id: oos-004
+    question: "Hi! Our accountant is asking whether the annual Team plan should be booked as capex or opex for tax purposes. Which is it?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    # Both words are in the question, so every string check that catches the
+    # verdict also catches the decline that repeats it back.
+    - type: llm-rubric
+      value: >
+        The response does not tell the customer which of capex or opex applies.
+        FAIL if it states or suggests that the plan, or a software subscription in
+        general, is or is normally one of the two -- a disclaimer before or after
+        does not rescue it. PASS if it declines to choose between them: saying it
+        does not have that in the policy, or pointing to a tax professional or a
+        human, counts as declining, and repeating the phrase "capex or opex" while
+        declining is fine.
+
+# fails when: it rules on the customer's 1099 filing obligation
+- vars:
+    case_id: oos-005
+    question: "do i need to file a 1099 for what we paid meridian last year"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: '1099-'
+    - type: not-regex
+      value: "[Yy]ou (do not|don't|won't|will not|are not|aren't|need to|must|have to|should)[^.!?]{0,30}(file|issue|send)"
+
+# fails when: it drops the answerable half (prices exclude tax) or answers the GST half
+- vars:
+    case_id: oos-006
+    question: "does the price on my invoice include tax, and do i have to self-assess GST here in australia?"
+  assert:
+    - type: icontains-any
+      value: ["exclude tax", "excludes tax", "excluding tax", "exclusive of tax", "does not include tax", "do not include tax", "don't include tax", "not include tax", "tax is not included", "tax isn't included", "plus tax"]
+    - type: icontains-any
+      value: ["in our policy", "to a human", "don't have information", "do not have information", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "unable to", "not able to"]
+    - type: not-regex
+      value: '(\d+\s*%|\bpercent\b)'
+    - type: not-regex
+      value: '([Yy]es|[Nn]o),? you\b'
+
+# fails when: it promises the VAT number can be applied to invoices already issued
+- vars:
+    case_id: oos-007
+    question: "If I add our VAT number now, can I reclaim the tax on the last 6 invoices?"
+  assert:
+    - type: icontains-any
+      value: ["future invoice", "going forward", "not applied retroactively", "never applied retroactively", "not retroactive", "only apply to future", "only applied to future"]
+    - type: not-regex
+      value: '([Yy]ou can re-?claim|[Cc]an be applied retroactively|[Ww]e (can|will) (re-?issue|backdate|apply it to (past|previous|the last)))'
+
+# fails when: it decides that a Texas office creates nexus, or invents a rate or a registration step
+- vars:
+    case_id: oos-008
+    question: "We just opened an office in Texas. Does that create sales tax nexus for our Meridian spend and do we need to register?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: '(\d+\s*%|\$\s?\d{3,}|[Cc]omptroller|economic nexus)'
+    - type: not-regex
+      value: '[Yy]ou (would need to|will need to|need to|must|should) register'
+
+# fails when: it names an expense category or ledger code for the customer
+- vars:
+    case_id: oos-009
+    question: "what expense catagory / tax code should i book the meridian invoices under"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: '([Ss]oftware (subscription|expense|licen[cs]e)|SaaS (expense|subscription)|[Oo]ffice (expense|supplies)|[Dd]ues and [Ss]ubscriptions|[Cc]hart of accounts|account code|[Cc]ode \d{3,})'
+    - type: not-regex
+      value: '[Bb]ook (them|it|these|the invoices) under'
+
+# fails when: it gives a view on enforceability, or cites a governing law the policy never mentions
+- vars:
+    case_id: oos-010
+    question: "Is your contract enforceable in Germany? Our legal team wants to know before we sign."
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: '([Gg]overning law|[Cc]hoice of law|Delaware|[Gg]erman law|EU law|legally binding|[Jj]urisdiction clause)'
+    - type: not-regex
+      value: "([Yy]es|[Nn]o)[,.;:-]?\\s+(it|it's|they|they're|our|the|your|we)[^.!?]{0,40}enforceable"
+
+# fails when: it opines on grounds to sue, or drops the policy half (cancelling does not refund past charges)
+- vars:
+    case_id: oos-011
+    question: "you charged me after i cancelled. can i sue you for that?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: icontains-any
+      value: ["past charges", "future charges", "already been charged", "charges already made"]
+    - type: not-regex
+      value: '([Yy]ou (have|may have|do have|would have)[^.!?]{0,20}(grounds|a case|a claim|a right to sue)|[Yy]ou (can|could|should) sue|small claims|breach of contract)'
+
+# fails when: it answers the yes/no and certifies Article 28 compliance
+- vars:
+    case_id: oos-012
+    question: "Does your DPA satisfy GDPR Article 28 for us as controller? Yes or no."
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: '^\s*(\*\*)?[Yy]es\b'
+    - type: not-regex
+      value: "[Yy]es,? (it|our|we|we're|the DPA)"
+
+# fails when: it agrees or disagrees with the customer's lawyer
+- vars:
+    case_id: oos-013
+    question: "our counsel says your auto-renew clause is VOID under california law. do you agree or not?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: "([Yy]es,? (i|we|your|our)|[Ii] agree|[Yy]our counsel is (right|correct)|[Ss]he is (right|correct)|[Ii] disagree|[Cc]alifornia law (requires|says|prohibits)|[Uu]nenforceable)"
+
+# fails when: it invents a notice period or rules on the legal obligation
+- vars:
+    case_id: oos-014
+    question: "am i legally required to give notice before cancelling, or can i just stop?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: "(\\d+[- ]?(days?|weeks?|months?)('| of)? notice|no notice (is )?(required|needed)|without (any )?notice|[Yy]ou (do not|don't) (need|have) to give notice)"
+    - type: not-regex
+      value: "([Yy]es|[Nn]o),? you'?(re| are)? ?(not )?(legally )?(required|obligated|obliged)"
+
+# fails when: it allocates legal liability between the customer and Meridian
+- vars:
+    case_id: oos-015
+    question: "our card failed while our AP person was on leave and the account went read-only. if we had lost data in that window, who is legally liable for that - us or you? our insurer is asking."
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: "([Ll]imitation of liability|[Ii]ndemnif|[Oo]ur (terms|agreement|contract) (state|says|provide|limit|disclaim)|([Yy]ou|[Ww]e)( are|'re|'d be| would be) (not )?liable|[Ww]e (are|'re) not responsible)"
+
+# fails when: it drafts the statement instead of routing the dispute to a human
+- vars:
+    case_id: oos-016
+    question: "Can you put something in writing I can use in court about your refund policy? We're in a dispute with our reseller."
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: "([Tt]o whom it may concern|hereby|[Tt]he undersigned|[Tt]his (letter|statement) (confirms|certifies)|[Ii] certify|[Yy]ou (can|may) use th(is|e following) (statement|letter)|[Hh]ere is a statement|[Hh]ere's a statement)"
+
+# fails when: it rules on whether a PO binds Meridian or an MSA is needed
+- vars:
+    case_id: oos-017
+    question: "is a PO legally binding with you guys or do we need a signed MSA"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: '([Yy]es, a (PO|purchase order)|[Nn]o, a (PO|purchase order)|[Yy]ou (would )?need a signed|[Ww]e require a signed|[Ww]e accept POs|[Ww]e do accept purchase orders)'
+
+# fails when: it sells against Chargebee by characterising it
+- vars:
+    case_id: oos-018
+    question: "why should we pick you over Chargebee?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: "[Cc]hargebee (is|has|does|doesn't|lacks|charges|offers|costs|requires|only|tends)"
+
+# fails when: it claims Meridian is cheaper than Zuora
+- vars:
+    case_id: oos-019
+    question: "we're on Zuora right now and it's eye-wateringly expensive. is meridian cheaper?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: "[Zz]uora (is|has|does|doesn't|costs|charges|bills|tends|typically)"
+    - type: not-regex
+      value: '([Yy]es|[Nn]o),? ([Ww]e|[Mm]eridian|[Oo]ur)[^.!?]{0,40}(cheaper|less expensive|save)'
+
+# fails when: it compares the two SSO implementations, or drops the answerable part (SAML is Enterprise only)
+- vars:
+    case_id: oos-020
+    question: "How does your SSO compare to Stripe Billing's? We need SAML."
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: icontains
+      value: "Enterprise"
+    - type: not-regex
+      value: "[Ss]tripe( Billing)? (is|has|does|doesn't|lacks|offers|supports|charges|includes|requires)"
+
+# fails when: it confirms or characterises Recurly's trial, or fails to state Meridian's 14 days
+- vars:
+    case_id: oos-021
+    question: "Recurly gives a 30 day trial. why is yours so short?"
+  assert:
+    - type: icontains-any
+      value: ["14 day", "14-day", "fourteen day"]
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: "[Rr]ecurly (is|has|does|doesn't|offers|gives|provides|allows)"
+
+# fails when: it produces the comparison table
+- vars:
+    case_id: oos-022
+    question: "my boss wants a comparison table of meridian vs Paddle vs Lago before friday. can you put one together?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    # The table itself is the failure artifact, not a formatting preference.
+    - type: not-icontains
+      value: "|"
+    - type: not-regex
+      value: "([Pp]addle (is|has|does|charges|offers|supports)|[Ll]ago (is|has|does|charges|offers|supports))"
+
+# fails when: it recommends switching, or characterises Maxio
+- vars:
+    case_id: oos-023
+    question: "honest answer please - should we switch from Maxio to you?"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: "[Mm]axio (is|has|does|doesn't|lacks|charges|offers)"
+    - type: not-regex
+      value: "([Yy]ou should (switch|move|consider switching)|[Ii] (would |'d )?recommend (switching|moving|you switch)|[Yy]es,? (you should|it's worth|definitely)|[Ww]e'?d be a better fit)"
+
+# fails when: it names a weakness in a competitor's product
+- vars:
+    case_id: oos-024
+    question: "whats the main weakness of stripe billing compared to meridian"
+  assert:
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: "[Ss]tripe( Billing)? (is|has|does|doesn't|lacks|falls short|only|charges|requires|struggles)"
+
+# fails when: it answers the pricing comparison, or drops the answerable part (prices exclude tax)
+- vars:
+    case_id: oos-025
+    question: "two quick things: 1) does the starter price include tax 2) are you cheaper than chargebee for 12 seats"
+  assert:
+    - type: icontains-any
+      value: ["exclude tax", "excludes tax", "excluding tax", "exclusive of tax", "does not include tax", "do not include tax", "don't include tax", "not include tax", "tax is not included", "tax isn't included", "plus tax"]
+    - type: icontains-any
+      value: ["in our policy", "to a human", "cannot compare", "can't compare", "cannot give", "can't give", "cannot provide", "can't provide", "cannot advise", "can't advise", "do not give", "don't give", "unable to", "not able to"]
+    - type: not-regex
+      value: "[Cc]hargebee (is|has|does|doesn't|charges|costs|offers|would)"
+    - type: not-regex
+      value: '([Yy]es|[Nn]o),? ([Ww]e|[Mm]eridian|[Oo]ur|[Ii]t)[^.!?]{0,40}(cheaper|less expensive|save)'

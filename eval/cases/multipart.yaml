@@ -1,0 +1,320 @@
+# multipart -- two- and three-part questions where a correct answer must address
+# EVERY part. One anchor per part, as a SEPARATE assertion, so a half-answer
+# fails on exactly the part it dropped.
+#
+# Anchors are facts (the number, the plan name, the settings path), never whole
+# sentences or word order. Each negative assertion guards the one hallucination
+# or over-promise its case invites; none can fire on a correct answer.
+#
+# No regex here uses (?i) -- promptfoo builds `new RegExp(value)` with no flags
+# and V8 rejects inline modifiers, so case variants are spelled out as classes.
+#
+# Include from promptfooconfig.yaml:  tests: [file://cases/multipart.yaml]
+# mp-024 and mp-030 use llm-rubric, so defaultTest.options.provider must pin a
+# judge or pair.py cannot build a contract key.
+
+# fails when: gives the cancel path and drops the money half, or implies the
+# unused part of the month comes back
+- vars:
+    case_id: mp-001
+    question: How do I cancel, and do I get the rest of the month back?
+  assert:
+    - {type: icontains-any, value: ["Settings > Billing", "Cancel plan"]}
+    - {type: icontains-any, value: ["does not refund", "doesn't refund", "not refunded", "won't be refunded", "no refund", "past charges", "already been charged"]}
+
+# fails when: explains the seats half and silently drops the VAT number half
+- vars:
+    case_id: mp-002
+    question: I need to add 3 seats and change my VAT number -- how?
+  assert:
+    - {type: icontains, value: "seat"}
+    - {type: icontains, value: "Billing Details"}
+    - {type: icontains-any, value: ["future invoices", "not applied retroactively", "never applied retroactively", "not retroactive", "going forward"]}
+    # the policy gives no settings path for adding seats; inventing one is a guess
+    - {type: not-regex, value: '>\s*([Aa]dd|[Mm]anage|[Ee]dit|[Bb]uy)\s+[Ss]eats?'}
+
+# fails when: answers the length and drops the card question
+- vars:
+    case_id: mp-003
+    question: how long's the trial and do i need to put a card in?
+  assert:
+    - {type: icontains-any, value: ["14 days", "14-day", "fourteen days"]}
+    - {type: icontains-any, value: ["no card", "no credit card", "without a card", "card is not required", "card isn't required", "don't need a card", "do not need a card", "not required"]}
+
+# fails when: prices the plan and drops the annual saving or the tax caveat
+- vars:
+    case_id: mp-004
+    question: What's the Team price per seat, does paying annually save anything, and is tax included in that?
+  assert:
+    - {type: icontains, value: "49"}
+    - {type: icontains-any, value: ["2 months free", "two months free", "10 months", "pay for 10"]}
+    - {type: icontains-any, value: ["exclude tax", "excludes tax", "excluding tax", "exclude VAT", "excludes VAT", "do not include tax", "does not include tax", "don't include tax", "not included", "plus tax", "before tax"]}
+
+# fails when: gives the retry count and drops what happens to the account after
+- vars:
+    case_id: mp-005
+    question: My card just failed. How many times do you try again, and what happens to my account after that?
+  assert:
+    - {type: regex, value: '\b(3|[Tt]hree)\b[^.]{0,30}\b([Rr]etr(y|ies)|[Aa]ttempts?|times)\b'}
+    - {type: icontains-any, value: ["7 days", "seven days", "day 7"]}
+    - {type: icontains-any, value: ["read-only", "read only"]}
+
+# fails when: gives the retention window and drops where to export from
+- vars:
+    case_id: mp-006
+    question: If my account goes read-only, how long do you keep my data, and where do I export it from before then?
+  assert:
+    - {type: icontains-any, value: ["60 days", "sixty days"]}
+    - {type: icontains-any, value: ["Settings > Data export", "Data export"]}
+
+# fails when: answers the SSO half and drops SCIM, or grants SSO on Team
+- vars:
+    case_id: mp-007
+    question: Can I get SSO on the Team plan, and does SCIM provisioning come with it?
+  assert:
+    - {type: icontains, value: "Enterprise"}
+    - {type: icontains, value: "SCIM"}
+
+# fails when: reads "US company" as ACH eligibility and grants it on Starter,
+# or answers ACH and drops wire
+- vars:
+    case_id: mp-008
+    question: We're a US company on Starter. Can we pay by ACH, and what about wire transfer?
+  assert:
+    - {type: icontains, value: "ACH"}
+    - {type: icontains, value: "wire"}
+    - {type: icontains-any, value: ["Team and Enterprise", "Team or Enterprise", "Team & Enterprise"]}
+    - {type: not-regex, value: '[Yy]ou can (pay|use|send|settle)[^,.]{0,15}\bACH\b'}
+    - {type: not-regex, value: '\bACH\b[^.]{0,40}\bavailable (to|for) (you|your account)\b'}
+
+# fails when: points at invoice history and drops the VAT half, or implies the
+# VAT number can be added to invoices already issued
+- vars:
+    case_id: mp-009
+    question: Where do I find my old invoices, and how do I get our VAT number printed on them?
+  assert:
+    - {type: icontains-any, value: ["Invoice history", "Billing > Invoice"]}
+    - {type: icontains, value: "Billing Details"}
+    - {type: icontains-any, value: ["future invoices", "not applied retroactively", "never applied retroactively", "not retroactive", "going forward", "won't apply to past", "not be applied to past"]}
+
+# fails when: adds 30 and 50 into one 80% discount, or quotes both rates and
+# never says they do not stack
+- vars:
+    case_id: mp-010
+    question: We're a nonprofit that also runs a school. Can we stack the nonprofit and education discounts, and what are they each worth?
+  assert:
+    - {type: icontains-any, value: ["do not stack", "don't stack", "not stack", "cannot be combined", "can't be combined", "not stackable", "aren't stackable", "only one"]}
+    - {type: icontains, value: "30%"}
+    - {type: icontains, value: "50%"}
+    - {type: not-icontains, value: "80%"}
+
+# fails when: gives the window and drops what happens outside it
+- vars:
+    case_id: mp-011
+    question: What's the refund window, and if I'm past it what do I get instead?
+  assert:
+    - {type: icontains-any, value: ["30 days", "30-day", "thirty days"]}
+    - {type: icontains, value: "credit"}
+
+# fails when: claims to have issued or arranged the refund instead of
+# explaining the policy and routing to a human
+- vars:
+    case_id: mp-012
+    question: i cancelled last week and i still got charged??? how do i get my money back and who do i talk to about this
+  assert:
+    - {type: icontains-any, value: ["past charges", "does not refund", "doesn't refund", "not refunded", "already been charged", "future charges"]}
+    - {type: icontains-any, value: ["human", "a person", "support team", "teammate", "colleague", "someone who can"]}
+    - {type: not-regex, value: '\bI\b[^.]{0,25}\b(issued|refunded|processed|approved|reversed)\b'}
+    - {type: not-regex, value: '\b([Yy]our|[Tt]he) refund (has|will|is)\b'}
+
+# fails when: gives the notice period and drops whether the rise lands mid-term
+- vars:
+    case_id: mp-013
+    question: I heard you're raising prices. How much notice do I get, and does the new price hit me mid-term?
+  assert:
+    - {type: icontains-any, value: ["30 days", "30-day", "thirty days"]}
+    - {type: icontains-any, value: ["grandfather", "current term", "rest of your term", "remainder of the term", "end of your term"]}
+
+# fails when: gives the Team SLA and drops Enterprise, or promises the
+# Enterprise 1 hour for every ticket rather than for sev1
+- vars:
+    case_id: mp-014
+    question: How fast do you reply to tickets on Team, and is it faster on Enterprise?
+  assert:
+    - {type: icontains-any, value: ["8 business hours", "eight business hours"]}
+    - {type: icontains-any, value: ["1 hour", "one hour"]}
+    - {type: icontains-any, value: ["sev1", "sev 1", "severity"]}
+
+# fails when: confirms deletion is permanent and drops the timing, or quotes
+# the 60-day read-only retention instead of the 30-day deletion window
+- vars:
+    case_id: mp-015
+    question: I want to delete our account. Is that reversible, and how long until the data is actually gone?
+  assert:
+    - {type: icontains-any, value: ["permanent", "cannot be reversed", "can't be reversed", "cannot be undone", "can't be undone", "irreversible", "not reversible"]}
+    - {type: icontains-any, value: ["30 days", "30-day", "thirty days"]}
+    - {type: not-icontains, value: "60 days"}
+
+# fails when: invents a rule for mid-term monthly-to-annual switching instead of
+# saying it is not in the policy
+- vars:
+    case_id: mp-016
+    question: "Two questions: what currencies can I pay in, and can I switch from monthly to annual halfway through a term?"
+  assert:
+    - {type: icontains-all, value: ["USD", "EUR", "GBP"]}
+    - {type: icontains-any, value: ["don't have", "do not have", "not in our policy", "isn't in our policy", "not covered", "doesn't cover", "no information", "not specified", "can't confirm", "cannot confirm"]}
+
+# fails when: answers price and SLA and then grants ACH because the customer
+# said Starter out loud
+- vars:
+    case_id: mp-017
+    question: We're on Starter. How much is it per seat, how fast is support, and can we pay by ACH?
+  assert:
+    - {type: icontains, value: "19"}
+    - {type: icontains-any, value: ["next business day", "next-business-day"]}
+    - {type: icontains, value: "ACH"}
+    - {type: not-regex, value: '[Yy]ou can (pay|use|send|settle)[^,.]{0,15}\bACH\b'}
+    - {type: not-regex, value: '\bACH\b[^.]{0,40}\b(is|are) available (to|for|on) (you|your account|Starter|the Starter)\b'}
+
+# fails when: gives the path and the formats and drops the plan-availability
+# part, or gates export behind a paid tier
+- vars:
+    case_id: mp-018
+    question: Where do I export our data, what formats do you support, and is export available on Starter?
+  assert:
+    - {type: icontains-any, value: ["Settings > Data export", "Data export"]}
+    - {type: icontains-all, value: ["CSV", "JSON"]}
+    - {type: icontains-any, value: ["all plans", "every plan", "all tiers", "including Starter", "including the Starter"]}
+
+# fails when: answers the charge for the added seats and drops the credit for
+# the removed one
+- vars:
+    case_id: mp-019
+    question: If I add 2 seats today and remove 1 next month, when am I charged and when am I credited?
+  assert:
+    - {type: icontains-any, value: ["immediately", "right away", "straight away", "at once"]}
+    - {type: icontains, value: "credit"}
+    - {type: icontains-any, value: ["next invoice", "next bill", "following invoice"]}
+
+# fails when: answers the tax-inclusion fact and then gives tax advice about
+# registering in Ireland
+- vars:
+    case_id: mp-020
+    question: Do your listed prices include VAT, and should we register for VAT in Ireland before we sign up?
+  assert:
+    - {type: icontains-any, value: ["exclude tax", "excludes tax", "excluding tax", "exclude VAT", "excludes VAT", "do not include", "does not include", "don't include", "not included"]}
+    - {type: icontains-any, value: ["don't have", "do not have", "can't advise", "cannot advise", "not able to advise", "tax advice", "tax professional", "tax advisor", "accountant", "not in our policy", "no information"]}
+
+# fails when: gives the retry duration and drops what happens to access, or
+# says access is cut off at the first failure
+- vars:
+    case_id: mp-021
+    question: How long does the whole failed-payment retry process take, and do I lose access while it's happening?
+  assert:
+    - {type: icontains-any, value: ["7 days", "seven days", "day 7"]}
+    - {type: icontains-any, value: ["read-only", "read only"]}
+
+# fails when: answers 1 and 2 of a numbered list and drops 3
+- vars:
+    case_id: mp-022
+    question: "Hi! Sorry, long one. We're on Starter annual. 1) what would Team cost per seat, 2) does annual still give the 2 months free on Team, 3) if prices go up before our term ends, are we protected?"
+  assert:
+    - {type: icontains, value: "49"}
+    - {type: icontains-any, value: ["2 months free", "two months free", "10 months", "pay for 10"]}
+    - {type: icontains-any, value: ["grandfather", "current term", "rest of your term", "remainder of the term", "end of your term"]}
+
+# fails when: gives the cancel path and never says what happens to next
+# month's charge
+- vars:
+    case_id: mp-023
+    question: can u tell me where the cancel button is and if i'll still get charged next month
+  assert:
+    - {type: icontains-any, value: ["Settings > Billing", "Cancel plan"]}
+    - {type: icontains-any, value: ["future charges", "no further charges", "won't be charged again", "stops future", "stop future", "no more charges"]}
+
+# fails when: answers the eligibility half and then recommends Meridian over a
+# named competitor
+- vars:
+    case_id: mp-024
+    question: What's the difference between your ACH and wire eligibility, and would you recommend Meridian over Stripe Billing for us?
+  assert:
+    - {type: icontains, value: "ACH"}
+    - {type: icontains, value: "wire"}
+    - {type: icontains-any, value: ["Team and Enterprise", "Team or Enterprise", "Team & Enterprise"]}
+    - type: llm-rubric
+      value: >-
+        The answer declines to compare Meridian with Stripe Billing or any other
+        named product, and does not recommend one over the other. Refusing to
+        compare passes. Any comparison of the two products, or a recommendation
+        between them, fails. Ignore everything else in the answer.
+
+# fails when: implies it can see or has already corrected the invoice instead of
+# saying it cannot and routing to a human
+- vars:
+    case_id: mp-025
+    question: Our invoice last month looks wrong. Can you fix it, and where do I find it to check?
+  assert:
+    - {type: icontains-any, value: ["Invoice history", "Billing > Invoice"]}
+    - {type: icontains-any, value: ["cannot see", "can't see", "cannot fix", "can't fix", "unable to see", "unable to fix", "don't have access", "do not have access"]}
+    - {type: icontains-any, value: ["human", "a person", "support team", "teammate", "colleague"]}
+    - {type: not-regex, value: '\bI\b[^.]{0,20}\b(fixed|corrected|adjusted|credited|reissued)\b'}
+
+# fails when: quotes an invented Enterprise price, or offers monthly billing on
+# a plan that is annual only
+- vars:
+    case_id: mp-026
+    question: We're looking at Enterprise. What does it cost, and can we pay monthly?
+  assert:
+    - {type: icontains-any, value: ["custom", "quoted by sales", "quote", "contact sales", "talk to sales"]}
+    - {type: icontains, value: "annual"}
+    - {type: not-regex, value: '\b[Yy]es\b[^.]{0,40}\b[Mm]onthly\b'}
+    - {type: not-regex, value: '\b([Yy]ou can|can be|is available) (pay |paid |billed |be billed )?[Mm]onthly\b'}
+    - {type: not-regex, value: '\$\s?\d'}
+
+# fails when: quotes the rate and drops what the customer has to send, or says
+# the discount lands automatically
+- vars:
+    case_id: mp-027
+    question: We're a university. Is the 50% education discount automatic, and what do you need from us to apply it?
+  assert:
+    - {type: icontains, value: "50%"}
+    - {type: icontains-any, value: ["documentation", "documents", "proof", "verification", "verify"]}
+    - {type: not-regex, value: '\b[Ii]s automatic'}
+    - {type: not-regex, value: '\b[Nn]o documentation\b'}
+
+# fails when: grants the extension, or declines it and drops the second
+# question about the cheapest plan
+- vars:
+    case_id: mp-028
+    question: Two things -- my trial ends tomorrow, can I get 5 more days? And if not, what's your cheapest plan?
+  assert:
+    - {type: icontains-any, value: ["not extendable", "cannot be extended", "can't be extended", "isn't extendable", "no extensions", "cannot extend", "can't extend", "not able to extend", "unable to extend"]}
+    - {type: icontains, value: "Starter"}
+    - {type: icontains, value: "19"}
+    - {type: not-regex, value: '\bI (can|will|.ll) (extend|add|give you|grant)\b'}
+
+# fails when: answers the proration half and drops where to look at the bill
+- vars:
+    case_id: mp-029
+    question: Does my bill go up right away if I add seats mid-term, and where do I find my past invoices?
+  assert:
+    - {type: icontains-any, value: ["prorat", "pro-rat"]}
+    - {type: icontains-any, value: ["immediately", "right away", "straight away"]}
+    - {type: icontains-any, value: ["Invoice history", "Billing > Invoice"]}
+
+# fails when: picks a plan for the customer and quotes one price as if it were
+# theirs. Both parts are plan-dependent, so asking one clarifying question and
+# listing every plan are BOTH correct -- no string check accepts both, which is
+# why this one is a rubric.
+- vars:
+    case_id: mp-030
+    question: What's my per-seat price, and how fast will you reply if I open a ticket?
+  assert:
+    - type: llm-rubric
+      value: >-
+        The answer must not state a single per-seat price or a single support
+        response time as if it were this customer's. It must either ask which
+        plan the customer is on, or give the figures for more than one plan.
+        Price and support response time must both be handled -- neither may be
+        silently dropped. Asking one clarifying question that covers both parts
+        passes.
