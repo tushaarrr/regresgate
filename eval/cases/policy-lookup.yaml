@@ -13,20 +13,20 @@
 # fails when: quotes the Team price for Starter, or answers without the number
 - vars: {case_id: pl-001, question: "how much is the Starter plan per seat?"}
   assert:
-    - {type: icontains-any, value: ["$19", "19 per seat", "19 USD", "19/seat"]}
+    - {type: regex, value: '(?<![\d.,])19(?!\d|[.,]\d)'}
     - {type: not-icontains, value: "$49"}
 
 # fails when: quotes the Starter price for Team, or answers without the number
 - vars: {case_id: pl-002, question: "Whats the monthly price per user on Team?"}
   assert:
-    - {type: icontains-any, value: ["$49", "49 per seat", "49 per user", "49 USD"]}
+    - {type: regex, value: '(?<![\d.,])49(?!\d|[.,]\d)'}
     - {type: not-icontains, value: "$19"}
 
 # fails when: invents a list price for Enterprise instead of "custom, quoted by sales"
 - vars: {case_id: pl-003, question: "How much does Enterprise cost?"}
   assert:
-    - {type: icontains-any, value: ["custom", "quoted", "quote", "sales"]}
-    - {type: not-regex, value: '\$\s?\d'}
+    - {type: icontains-any, value: ["quoted by sales", "quoted by our sales", "custom quote", "custom pricing", "custom, quoted", "contact sales", "talk to sales", "speak to sales", "sales team", "sales will quote"]}
+    - {type: not-regex, value: '[$€£]\s?\d|\d\s?(?:USD|EUR|GBP|dollars|euros|pounds)'}
 
 # fails when: states a discount other than 2 months free (e.g. "20% off", "3 months free")
 - vars: {case_id: pl-004, question: "if i pay for a year up front do i get a discount"}
@@ -44,7 +44,7 @@
 # fails when: says the listed prices already include tax
 - vars: {case_id: pl-006, question: "Are the prices on your site inclusive of tax?"}
   assert:
-    - {type: icontains-any, value: ["exclude", "excluding", "do not include", "does not include", "before tax", "plus tax"]}
+    - {type: icontains-any, value: ["exclude tax", "excludes tax", "excluding tax", "exclusive of tax", "not include tax", "n't include tax", "before tax", "plus tax", "tax is added", "tax on top", "exclude VAT", "excludes VAT", "excluding VAT", "exclusive of VAT"]}
 
 # fails when: omits the 30 day notice, or says the new price applies immediately
 - vars: {case_id: pl-007, question: "How much notice do you give before a price increase, and does it hit me right away?"}
@@ -55,7 +55,7 @@
 # fails when: offers monthly billing on Enterprise
 - vars: {case_id: pl-008, question: "We want Enterprise but we budget monthly. Can we be billed monthly on Enterprise?"}
   assert:
-    - {type: icontains-any, value: ["annual only", "annually only", "annual-only", "only annual", "annual billing only", "billed annually"]}
+    - {type: icontains-any, value: ["annual only", "annually only", "is annual-only", "annual-only billing", "only annual", "only offers annual", "only on an annual", "annual billing only", "yearly only", "billed annually only", "no monthly billing", "monthly billing is not", "monthly billing isn't"]}
 
 # fails when: states a trial length other than 14 days
 - vars: {case_id: pl-009, question: "how long is the free trial"}
@@ -71,8 +71,12 @@
 # fails when: says the trial gives Starter (or Enterprise) features instead of Team
 - vars: {case_id: pl-011, question: "Which plan's features do I actually get while I'm trialling?"}
   assert:
-    - {type: icontains, value: "Team"}
-    - {type: not-icontains, value: "Enterprise"}
+    # Both word orders: "Team features" AND "the features of the Team plan".
+    # The model writes the second about half the time; requiring only the first
+    # failed a correct answer. An over-tightened assertion burns the case and
+    # looks like a regression, which is worse than the tautology it replaced.
+    - {type: regex, value: "[Tt]eam\\*{0,2}(?:[- ]\\*{0,2}plan)?(?:'s)?[- ]\\*{0,2}features?|features? of (?:the )?\\*{0,2}[Tt]eam"}
+    - {type: not-regex, value: "(?<!not )(?<!n't )(?<!than )(?<!of )(?:[Ss]tarter|[Ee]nterprise)(?:[- ]plan)?(?:'s)?[- ]features?"}
 
 # fails when: grants or offers a trial extension
 - vars: {case_id: pl-012, question: "Our eval ran long. Can we get another week on the trial?"}
@@ -112,7 +116,7 @@
 # fails when: says billing continues after cancellation
 - vars: {case_id: pl-018, question: "Does cancelling stop future charges or do I keep getting billed?"}
   assert:
-    - {type: icontains-any, value: ["stops future charges", "stop future charges", "no further charges", "no future charges", "not be billed again"]}
+    - {type: regex, value: "[Ss]tops (?:all |any )?(?:future|further) (?:charges|billing|payments)|[Ss]top (?:all |any )?(?:future|further) (?:billing|payments)|(?:won't|wo n't|will not) be (?:charged|billed) again|no (?:further|future|more) charges"}
 
 # fails when: says added seats are billed on the next invoice rather than immediately
 - vars: {case_id: pl-019, question: "We're adding 4 seats next week. When do we get charged for them?"}
@@ -126,10 +130,10 @@
     - {type: icontains, value: "credit"}
     - {type: icontains-any, value: ["next invoice", "next bill"]}
 
-# fails when: says mid-term seats are charged at full price
+# fails when: says mid-term seats are charged at full price, or echoes the question
 - vars: {case_id: pl-021, question: "Adding seats mid-term - is it prorated or full price?"}
   assert:
-    - {type: icontains-any, value: ["prorated", "pro-rated", "pro rata"]}
+    - {type: icontains-any, value: ["is prorated", "are prorated", "is pro-rated", "are pro-rated", "it's prorated", "they're prorated", "prorated and", "prorated, and", "prorated amount", "prorated charge", "prorated based on", "pro rata"]}
 
 # fails when: invents an invoice location other than Billing > Invoice history
 - vars: {case_id: pl-022, question: "where can i download last quarters invoices"}
@@ -151,12 +155,18 @@
 # fails when: says card payment needs a higher tier than Starter
 - vars: {case_id: pl-025, question: "Can I pay by card on the Starter plan?"}
   assert:
-    - {type: icontains-any, value: ["yes", "all plans", "is accepted", "is available"]}
+    # The scope regex alone is satisfied by the QUESTION echoed back -- it says
+    # "card" and "Starter" within sixty characters. The answer has to carry an
+    # affirmation of its own.
+    - {type: regex, value: "(?:[Yy]es\\b|[Cc]ards?(?: payments?)? (?:are|is) (?:accepted|available|supported|fine)|[Ww]e accept (?:all major )?cards?|[Cc]ards?(?: payments?)? work|[Yy]ou can pay by card|[Cc]ard payment is fine)"}
+    - {type: regex, value: "(?:[Yy]es|[Cc]ards?|[Cc]ard payments?)[^.]{0,60}(?:all plans|every plan|[Ss]tarter)"}
+    - {type: not-regex, value: "(?:not|n't)[^.]{0,30}on (?:the )?Starter|Team and Enterprise only|Enterprise only|requires? (?:the )?(?:Team|Enterprise)"}
 
 # fails when: refuses ACH to a US customer on Team
 - vars: {case_id: pl-026, question: "Do you accept ACH? We're a US company on the Team plan."}
   assert:
-    - {type: icontains-any, value: ["yes", "ACH is available", "accepted", "is supported"]}
+    - {type: regex, value: "(?:[Yy]es|ACH)[^.]{0,60}(?:accepted|available|supported|works|an option|fine|no problem)"}
+    - {type: not-regex, value: "(?:not|n't|unable|cannot)[^.]{0,30}(?:ACH|accept|available|support)|only (?:accepted|available|supported|offered|for|on|to)[^.]{0,15}Enterprise"}
 
 # fails when: omits that wire is Enterprise-only and annual-only
 - vars: {case_id: pl-027, question: "Can we pay by wire transfer?"}
@@ -173,7 +183,7 @@
 # fails when: offers ACH to a non-US customer
 - vars: {case_id: pl-029, question: "We're a German company on Team, can we pay by ACH?"}
   assert:
-    - {type: icontains-any, value: ["US customers", "U.S. customers", "United States", "US-based", "US only"]}
+    - {type: icontains-any, value: ["US customers", "U.S. customers", "United States", "US-based customers", "US-based companies", "US-based businesses", "in the US", "in the U.S.", "US only", "US companies only"]}
     - {type: icontains-any, value: ["only", "not available", "isn't available", "cannot", "can't", "no,"]}
 
 # fails when: states a retry count or window other than 3 retries over 7 days
@@ -185,7 +195,7 @@
 # fails when: says the account is suspended, closed or deleted rather than read-only
 - vars: {case_id: pl-031, question: "What actually happens to my account if the payment keeps failing?"}
   assert:
-    - {type: icontains-any, value: ["read-only", "read only"]}
+    - {type: icontains-any, value: ["becomes read-only", "become read-only", "be read-only", "is read-only", "goes read-only", "go read-only", "into read-only", "to read-only", "read-only mode", "read-only access", "becomes read only", "be read only", "is read only", "to read only", "read only mode", "read only access"]}
 
 # fails when: states a read-only retention other than 60 days
 - vars: {case_id: pl-032, question: "If my account goes read-only, how long do I have before you delete our data?"}
@@ -207,7 +217,8 @@
 # fails when: says export is a paid add-on or needs a tier above Starter
 - vars: {case_id: pl-035, question: "Is data export a paid add-on or is it included on Starter?"}
   assert:
-    - {type: icontains-any, value: ["all plans", "every plan", "included on Starter", "included on all", "yes"]}
+    - {type: icontains-any, value: ["all plans", "every plan", "included on all", "included in every", "included with every", "no extra cost", "no additional cost", "at no extra"]}
+    - {type: not-regex, value: "(?<!not )(?<!n't )(?<!isn't )a paid add-on|costs extra|extra charge for export|only on (?:Team|Enterprise)"}
 
 # fails when: implies deletion is reversible, or omits the 30 day removal
 - vars: {case_id: pl-036, question: "If I delete my account can I get it back later? And how long until the data is actually gone?"}
@@ -269,7 +280,8 @@
 # fails when: says no documentation is needed to get the nonprofit rate
 - vars: {case_id: pl-046, question: "Do I need to send you anything to get the nonprofit rate?"}
   assert:
-    - {type: icontains-any, value: ["documentation", "document", "proof", "verification", "evidence"]}
+    - {type: regex, value: "(?:[Dd]ocumentation|[Dd]ocuments?|[Pp]roof|[Vv]erification|[Ee]vidence)[^.]{0,30}(?:is |are )?(?:required|needed|necessary)|(?:[Nn]eed|[Rr]equire|[Ss]end|[Pp]rovide|[Ss]hare|[Ss]ubmit|ask for)[^.]{0,30}(?:documentation|documents?|proof|verification|evidence)"}
+    - {type: not-regex, value: "(?:not|n't|[Nn]o)[^.]{0,25}(?:documentation|documents?|proof|verification|evidence)[^.]{0,20}(?:needed|required|necessary)|(?:don't|do not|doesn't|does not) (?:need|have to|require)"}
 
 # fails when: swaps the two prices, or answers with only one of them
 - vars: {case_id: pl-047, question: "Hey quick one - Starter and Team prices please, per seat per month."}
@@ -299,8 +311,8 @@
 # fails when: confirms the customer's wrong claim that SSO is on Team
 - vars: {case_id: pl-051, question: "Someone told me SSO is available on Team now. Is that true?"}
   assert:
-    - {type: icontains, value: "Enterprise"}
-    - {type: icontains-any, value: ["not true", "incorrect", "not correct", "isn't true", "no,", "not available on Team", "not accurate"]}
+    - {type: regex, value: "(?:SSO|SAML|[Ss]ingle sign-on)[^.]{0,60}[Ee]nterprise|[Ee]nterprise[^.]{0,60}(?:SSO|SAML|[Ss]ingle sign-on)|[Ee]nterprise[- ]only|only on (?:the )?Enterprise"}
+    - {type: icontains-any, value: ["not true", "incorrect", "not correct", "isn't true", "no,", "not available on Team", "not accurate", "not right", "isn't right", "not the case", "was mistaken", "that's not"]}
 
 # fails when: states the wrong retry count or the wrong retry schedule
 - vars: {case_id: pl-052, question: "How many payment retry attempts do I get, and what days do they land on?"}
@@ -336,7 +348,9 @@
 - vars: {case_id: pl-057, question: "quick sanity check: is ACH available on Starter?"}
   assert:
     - {type: icontains-any, value: ["Team", "Enterprise"]}
-    - {type: icontains-any, value: ["not available", "isn't available", "no,", "cannot", "can't", "only", "requires"]}
+    # A fixed phrase list cannot survive an article: the model wrote "not
+    # available on THE Starter PLAN" and every literal in the old list missed it.
+    - {type: regex, value: "(?:not|n't)[^.]{0,20}(?:available|supported|offered|an option|on)[^.]{0,20}(?:the )?Starter|(?:Team (?:and|or) Enterprise|Enterprise)(?: plans?)? only|requires? (?:the )?Team|upgrade to (?:the )?Team"}
 
 # fails when: answers the cancel path but not the refund question (or promises the refund)
 - vars: {case_id: pl-058, question: "I want to leave. Where's cancel, and does that refund the charge from last week?"}
@@ -350,7 +364,12 @@
     - {type: icontains-any, value: ["30 days", "thirty days"]}
     - {type: not-icontains, value: "60 days"}
 
-# fails when: says the trial runs on Starter features
+# fails when: says the trial runs on Starter features, or echoes the question
 - vars: {case_id: pl-060, question: "Does the trial come with Starter features or Team features? Need to know before we evaluate."}
   assert:
-    - {type: icontains, value: "Team"}
+    # Both word orders: "Team features" AND "the features of the Team plan".
+    # The model writes the second about half the time; requiring only the first
+    # failed a correct answer. An over-tightened assertion burns the case and
+    # looks like a regression, which is worse than the tautology it replaced.
+    - {type: regex, value: "[Tt]eam\\*{0,2}(?:[- ]\\*{0,2}plan)?(?:'s)?[- ]\\*{0,2}features?|features? of (?:the )?\\*{0,2}[Tt]eam"}
+    - {type: not-regex, value: "(?<!not )(?<!n't )(?<!than )(?<!of )[Ss]tarter(?:[- ]plan)?(?:'s)?[- ]features?"}

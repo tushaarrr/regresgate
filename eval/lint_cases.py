@@ -189,6 +189,31 @@ def load(path):
     return json.loads(r.stdout) or []
 
 
+# promptfoo compiles a regex with JS `new RegExp`. These compile in Python and
+# either throw or mean something else in JS, so a regex that works under this
+# lint would silently not work in the actual eval. Measured: JS has no inline
+# flags, no named group with (?P<>), no \A/\Z/\z, no comment groups, and its
+# \b is ASCII-only.
+_PY_ONLY = [(re.compile(r"\(\?[aiLmsux]+\)"), "inline flags (?i) -- JS has none; "
+             "use a character class like [Nn]o"),
+            (re.compile(r"\(\?P[<=]"), "(?P<name>) -- JS spells it (?<name>)"),
+            (re.compile(r"\\[AZz]"), "\\A / \\Z / \\z -- JS has ^ and $ only"),
+            (re.compile(r"\(\?#"), "(?#comment) -- JS has no comment group")]
+
+
+def js_incompatible(asserts):
+    """-> [(value, why)] for regexes that would not behave the same under JS."""
+    out = []
+    for a in asserts:
+        if not str(a.get("type", "")).endswith("regex"):
+            continue
+        v = str(a.get("value"))
+        for pat, why in _PY_ONLY:
+            if pat.search(v):
+                out.append((v, why))
+    return out
+
+
 def lint(paths):
     flagged, rubric_only, total = [], [], 0
     for path in paths:
@@ -197,7 +222,8 @@ def lint(paths):
                 continue
             total += 1
             cid = (case.get("vars") or {}).get("case_id", "?")
-            hits = []
+            hits = [("JS-incompatible regex: " + why, v)
+                    for v, why in js_incompatible(case["assert"])]
             for name, text in probes(case):
                 ok, n_hard = passes(case["assert"], text)
                 if ok and n_hard:
@@ -253,6 +279,14 @@ def _selfcheck():
              "assert": [{"type": "regex", "value": r"(?<![\d.,])19(?!\d|[.,]\d)"}]}
     assert not [n for n, t in probes(fixed) if passes(fixed["assert"], t)[0]], \
         "a guarded number regex must be clean"
+
+    # a regex that works here but not in the eval is worse than no regex
+    assert js_incompatible([{"type": "regex", "value": "(?i)no"}])
+    assert js_incompatible([{"type": "not-regex", "value": r"(?P<n>x)"}])
+    assert js_incompatible([{"type": "regex", "value": r"\Afoo"}])
+    assert not js_incompatible([{"type": "regex", "value": r"(?<![\d.,])19(?!\d)"}]), \
+        "JS supports lookbehind and lookahead"
+    assert not js_incompatible([{"type": "icontains", "value": "(?i)"}]), "not a regex"
 
     # nothing may pass on an empty answer
     assert not passes([{"type": "icontains", "value": "x"}], "")[0]

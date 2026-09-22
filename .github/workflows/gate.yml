@@ -105,6 +105,7 @@ jobs:
           PYTHONPATH=. python3 stats/adapter.py
           python3 verdict_cache.py
           python3 retry_sim.py --selfcheck
+          python3 doctor.py --selfcheck
           python3 doctor.py || true      # reports; never the reason CI is red
           python3 scenarios.py > /dev/null
           python3 validate_workflows.py

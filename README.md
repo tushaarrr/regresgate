@@ -190,6 +190,41 @@ for m in parse preflight pair fetch_baseline quarantine drift_monitor \
 | `tests/`, `regressgate/contract_test.sh` | twelve named contract tests and seven shell checks, one per promptfoo behaviour the harness depends on; both run in CI against the published binary, never a checkout |
 
 [PLAN.md](PLAN.md) is the design document, including what was cut and why.
+[CONTRIBUTING.md](CONTRIBUTING.md) has the one rule. [SECURITY.md](SECURITY.md)
+says what is not defended.
+
+## Using it with something other than promptfoo
+
+Everything above the parser is runner-agnostic arithmetic. `parse.py` is the
+only file that knows what a promptfoo export looks like; it turns one into a
+list of rows, and nothing downstream ever sees the original JSON:
+
+| field | why it is there |
+|---|---|
+| `case_id` | the pair key. Must be stable across runs and explicit in your data, never an index |
+| `prompt_idx`, `repeat_index` | the other two thirds of the sample identity. `repeat_index` must come from the *provider*, echoed back, because promptfoo strips it before assertions run |
+| `state` | `PASSED` / `FAILED` / `ERROR` / **`UNSCORED`**. The fourth is the one people leave out, and it is why a 429 storm does not read as a quality collapse |
+| `model_id` | the **served** model snapshot, echoed by the provider. Without it, a silent model swap at a flat pass rate is invisible |
+| `assertions[].reason` | the judge's rationale, which is what `triage.py` groups on |
+
+A second runner means writing a `parse.py` for it, plus a `contract_key` that
+identifies its suite. That is the whole boundary. There is one adapter today and
+the schema is not frozen — it has changed twice while being used, so treating it
+as a published standard would be premature.
+
+## An eval-reliability failure corpus
+
+Reproducing an eval failure is most of the work of fixing it. These are
+checked in and runnable, no API key:
+
+| | |
+|---|---|
+| `regressgate/scenarios/*.json` | ten pairing documents, one per gate verdict, plus repeat-invariance and quarantine-explains-it |
+| `regressgate/fixture/` | a config that sets `sharing:`, one with a YAML typo, one that errors on every row, one that hangs for SIGINT, and an env file that hijacks `PROMPTFOO_CONFIG_DIR` |
+| `eval/offline/` | a deterministic 12-case provider that breaks on command and swaps its served model id at a flat pass rate |
+| `tests/`, `contract_test.sh` | nineteen pinned promptfoo behaviours, each of which silently breaks something if you do not know it |
+
+`bash regressgate/e2e_test.sh` runs the pipeline against all of it.
 
 ## State
 

@@ -107,19 +107,21 @@
     - type: icontains-any
       value: ["saml", "which plan", "what plan", "are you on", "let me know"]
 
-# fails when: commits to a support time without knowing the plan
+# fails when: commits to a response time ("you'll get a reply within 1 hour")
+# without asking which plan they are on
 - vars: {case_id: clr-012, question: "If I raise a sev1 now, when do you respond?"}
   assert:
     - type: icontains-any
-      value: ["enterprise", "which plan", "what plan", "are you on", "depends on"]
+      value: ["which plan", "what plan", "plan are you", "are you on", "which tier", "are you an enterprise"]
 
-# fails when: assumes monthly and says the trial converts at $49
+# fails when: invents an end-of-trial rule the policy does not state -- an
+# automatic conversion, or a charge at $49
 - vars: {case_id: clr-013, question: "What happens at the end of my trial?"}
   assert:
     - type: icontains-any
-      value: ["14 day", "14-day", "which plan", "what plan", "let me know", "depends on", "trial"]
+      value: ["14 day", "14-day", "not extendable", "isn't extendable", "cannot be extended", "can't be extended", "no card", "which plan", "what plan", "not in our policy", "not in the policy", "don't have that", "do not have that", "a human"]
     - type: not-regex
-      value: "you will be charged \\$\\d+ "
+      value: "([Yy]ou('ll| will|r card will) be charged|automatically (be )?(charged|converted|moved|upgraded|billed)|converts? to (a )?paid)"
 
 # fails when: picks one of the two annual readings and answers only that
 - vars: {case_id: clr-014, question: "Is annual cheaper?"}
@@ -143,11 +145,14 @@
     - type: icontains-any
       value: ["which plan", "what plan", "are you on", "depends on", "let me know", "cannot see", "can't see"]
 
-# fails when: gives the read-only timeline without knowing which retry failed
+# fails when: says access is already gone, or invents a deletion timeline,
+# instead of giving the 3-retries-over-7-days schedule
 - vars: {case_id: clr-017, question: "My payment bounced. Am I about to lose access?"}
   assert:
     - type: icontains-any
-      value: ["3 retries", "three retries", "7 day", "seven day", "read-only", "read only"]
+      value: ["3 retries", "three retries", "3 times", "three times", "3 attempts", "three attempts", "7 day", "seven day", "day 7", "third failure", "third attempt", "third retry"]
+    - type: not-regex
+      value: "(los(e|ing) access (immediately|right away|today|now)|deleted after (7|seven)|[Yy]our (account|data) (is|has been) (now )?deleted)"
 
 # fails when: names a plan for an unspecified team size
 - vars: {case_id: clr-018, question: "Which plan should we be on?"}
@@ -165,8 +170,10 @@
     - type: icontains-any
       value: ["annual", "which plan", "what plan", "are you on"]
 
-# fails when: answers for one region when tax handling is unstated
+# fails when: says the listed price includes tax
 - vars: {case_id: clr-020, question: "Does the price include tax?"}
   assert:
     - type: icontains-any
-      value: ["exclude", "excluding", "excludes", "not include", "before tax", "plus tax"]
+      value: ["exclude tax", "excludes tax", "excluding tax", "exclusive of tax", "don't include tax", "do not include tax", "does not include tax", "before tax", "plus tax", "added on top", "on top of the price"]
+    - type: not-regex
+      value: "([Pp]rices? (do |does )?includes? tax|[Tt]ax is included)"

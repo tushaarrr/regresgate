@@ -158,10 +158,30 @@ CHECKS = [("python", check_python), ("node", check_node), ("promptfoo", check_pr
           ("calibration", check_quarantine), ("baselines", check_baselines)]
 
 
+def _selfcheck():
+    assert _age_days("2020-01-01T00:00:00Z") > 2000
+    assert _age_days(None) is None and _age_days("garbage") is None
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert _age_days(now) == 0
+    assert _wrap("a b c", 3) == ["a b", "c"]
+    assert _wrap("") == []
+    # a doctor must never be the reason a run fails: every check returns a
+    # triple, and main() catches anything that raises
+    for name, fn in CHECKS:
+        st, msg, fix = fn()
+        assert st in (OK, WARN, FAIL), (name, st)
+        assert isinstance(msg, str) and isinstance(fix, str), name
+    print("doctor selfcheck OK")
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--quiet", action="store_true", help="only warnings and failures")
+    ap.add_argument("--selfcheck", action="store_true")
     a = ap.parse_args(argv)
+    if a.selfcheck:
+        return _selfcheck()
 
     bad = 0
     for name, fn in CHECKS:
