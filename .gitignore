@@ -1,3 +1,10 @@
+# Secrets. This repo is public and the gate needs a real provider key, so this
+# block is load-bearing: one `git add -A` without it publishes the key.
+.env
+.env.*
+!.env.example
+eval/.env.ci
+
 # Local tooling
 .venv/
 __pycache__/
