@@ -97,6 +97,9 @@ jobs:
           python3 fetch_baseline.py --selfcheck
           python3 quarantine.py --selfcheck
           python3 drift_monitor.py --selfcheck
+          python3 triage.py --selfcheck
+          python3 adjudicate.py --selfcheck
+          python3 escape_monitor.py --selfcheck
           PYTHONPATH=. python3 stats/adapter.py
           python3 verdict_cache.py
           python3 scenarios.py > /dev/null
