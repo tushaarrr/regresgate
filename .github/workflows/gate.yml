@@ -242,30 +242,51 @@ jobs:
             }
 
       - name: Promote this run as the next baseline
-        # Only from main, and only from a run the gate did not reject. Promoting a
-        # blocked run would launder the regression into the baseline, after which
-        # every later PR measures against the worse suite and sees nothing.
-        if: github.event_name == 'push' && steps.gate.outputs.decision == '0'
+        # From main only, and only from a run the gate did not reject on QUALITY.
+        # Promoting a BLOCK would launder the regression into the baseline, after
+        # which every later PR measures against the worse suite and sees nothing.
+        #
+        # 30 (REFUSE) must promote, and this is not a loophole -- it is the only
+        # way the system ever starts. A fresh repo has no baseline, so the gate
+        # REFUSEs; if REFUSE did not promote, nothing would ever be promoted and
+        # every PR would REFUSE forever. REFUSE means "could not compare", never
+        # "bad": the other way to reach it is a drifted contract, where a new
+        # baseline on the new contract is exactly what the refusal asks for.
+        # 20/40/50 still never promote.
+        if: github.event_name == 'push' && (steps.gate.outputs.decision == '0' || steps.gate.outputs.decision == '30')
         run: |
           python3 regressgate/fetch_baseline.py --head "$RUNNER_TEMP/head.json" \
             --promote --git-sha "${{ github.sha }}"
 
       - name: Save promoted baselines
-        if: github.event_name == 'push' && steps.gate.outputs.decision == '0'
+        if: github.event_name == 'push' && (steps.gate.outputs.decision == '0' || steps.gate.outputs.decision == '30')
         uses: actions/cache/save@v4
         with:
           path: regressgate/baselines
           key: regressgate-baselines-${{ github.run_id }}
 
       - name: Enforce
+        env:
+          DECISION: ${{ steps.gate.outputs.decision }}
+          EVENT: ${{ github.event_name }}
         run: |
-          case "${{ steps.gate.outputs.decision }}" in
+          case "$DECISION" in
             0)  echo "gate: merge allowed" ;;
             20) echo "::error::regressgate BLOCK -- statistically real quality regression"; exit 1 ;;
-            30) echo "::warning::regressgate REFUSE -- no compatible baseline, no verdict"; exit 1 ;;
+            30) # On a PR this is a real stop: nothing was measured, so nothing is
+                # known, and a green check would be a lie. On a push to main the
+                # previous step has just promoted this run as the new baseline,
+                # which is the intended resolution, so failing here would leave
+                # main permanently red for doing the right thing.
+                if [ "$EVENT" = push ]; then
+                  echo "::warning::regressgate REFUSE -- no comparable baseline; promoted this run as the new one"
+                else
+                  echo "::warning::regressgate REFUSE -- no compatible baseline, no verdict"
+                  exit 1
+                fi ;;
             40) echo "::error::regressgate HARD_FAIL -- case count mismatch, suite is wrong"; exit 1 ;;
             50) echo "::error::regressgate HARNESS_ERROR -- infrastructure, not a quality verdict"; exit 1 ;;
-            *)  echo "::error::gate.py exited ${{ steps.gate.outputs.decision }}"; exit 1 ;;
+            *)  echo "::error::gate.py exited $DECISION"; exit 1 ;;
           esac
 
       - uses: actions/upload-artifact@v4
