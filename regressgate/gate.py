@@ -265,7 +265,7 @@ def render(decision, d):
     elif decision == "COMMENT":
         if d.get("degraded"):
             why = ("has never been measured" if d["degraded"] == "unmeasured"
-                   else "is below the 0.60 floor")
+                   else "is below the 0.60 floor or its A/A churn is over the 6% ceiling")
             L += [f"**Not blocking:** this shift clears both statistical bars, but the "
                   f"suite's power@-5pp {why}, so the gate is running comment-only. "
                   "A suite that cannot reliably see the effect size it was built for "

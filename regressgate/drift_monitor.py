@@ -53,7 +53,7 @@ MEASURED = ("OK", "TESTS_FAILED")
 
 def record(db, export_path, git_sha, branch, trigger, repeat, exit_code, run_id=None):
     ex = pair.load(export_path)
-    key = pair.contract_key(ex["config"])
+    key = pair.contract_key(ex["config"], ex.get("tests"))   # published export: config.tests is raw file:// strings
     cases = {r.case_id for r in ex["rows"] if r.case_id is not None}
     stats = ex["stats"]
     s, f, e = (stats.get("successes", 0), stats.get("failures", 0), stats.get("errors", 0))
@@ -246,6 +246,15 @@ def _selfcheck():
     db.commit()
     assert not check(db)["alarms"], "an outage must not be charted as a quality drop"
     print("  harness-errored night excluded from the series, not charted as 0%")
+    # the PUBLISHED export shape through record() itself (config.tests are raw
+    # file:// strings) -- the second call site the first contract-key fix missed
+    pub = os.path.join(tempfile.mkdtemp(), "night.json")
+    with open(pub, "w") as f:
+        json.dump(pair.published_export([("a", "q1", "x")]), f)
+    db2 = store.open_db(os.path.join(tempfile.mkdtemp(), "d2.db"))
+    record(db2, pub, "sha", "main", "nightly", 1, 0, run_id="pub-1")
+    db2.commit()
+    assert check(db2)["nights"] == 1, "a published-shape export must record as a measured night"
     print("drift_monitor selfcheck OK")
     return 0
 

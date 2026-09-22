@@ -276,7 +276,7 @@ def build_manifest(head: dict) -> dict:
             "dataset_sha": dataset_sha(cfg, tests), "case_ids": ids}
 
 
-def read_quarantine(path, n_cases):
+def read_quarantine(path, n_cases, contract_key=None):
     """-> (excluded case ids, power_floor_ok). The cap covers the UNION of the
     quarantine set and the flaky watchlist -- capping them separately is how the
     watchlist alone reaches 30 cases in a year and costs 11 points of power
@@ -291,9 +291,25 @@ def read_quarantine(path, n_cases):
         return [], None
     with open(path) as f:
         q = json.load(f)
+    # A measurement belongs to the suite it was taken on. Exclusions and the
+    # power floor from an older golden set, judge or pin say nothing about this
+    # one, so a mismatched contract is "unmeasured" -- never carried over.
+    qk = q.get("contract_key")
+    if contract_key is not None and qk is not None and qk != contract_key:
+        print("::warning::quarantine.json was measured on a different contract "
+              f"{json.dumps(qk, sort_keys=True)}; ignoring it. Re-run the A/A "
+              "replays through quarantine.py on this suite.", file=sys.stderr)
+        return [], None
     ids = sorted({*(q.get("quarantined") or []), *(q.get("watchlist") or [])})
     power_ok = q.get("power_ok")
-    if power_ok and _stale(q.get("measured_at")):
+    if q.get("churn_ok") is False:
+        # The churn ceiling STOPS the gate rather than informing it. quarantine.py
+        # already exits 1 on this, but the json it wrote is still what the PR
+        # path reads, so the stop has to be enforced here too.
+        print("::warning::A/A churn is over the ceiling in quarantine.json; the "
+              "gate runs comment-only until the suite is stabilised", file=sys.stderr)
+        power_ok = False
+    if power_ok is not None and _stale(q.get("measured_at")):
         print(f"::warning::power floor last measured {q.get('measured_at')}, over "
               f"{POWER_MAX_AGE_DAYS} days ago; treating it as unmeasured", file=sys.stderr)
         power_ok = None
@@ -347,7 +363,7 @@ def build(head_path, baseline_path, manifest_path=None, quarantine_path=None,
         else:
             doc["n_cases_expected"] = len(build_manifest(head)["case_ids"])
         doc["quarantined"], doc["power_floor_ok"] = read_quarantine(
-            quarantine_path, doc["n_cases_expected"])
+            quarantine_path, doc["n_cases_expected"], doc["head"]["contract_key"])
 
         # A missing baseline is a REFUSE, not an error: gate.py says so in the PR
         # comment rather than guessing at a comparison.
@@ -410,6 +426,25 @@ def _row(case, pidx=0, rep=None, state=parse.PASSED):
     return parse.Row(case_id=case, prompt_idx=pidx, repeat_index=rep, state=state,
                      success=state == parse.PASSED, score=None, model_id="m",
                      latency_ms=None, cost=None, error=None)
+
+
+def published_export(cases, desc="s"):
+    """An export in the shape the PUBLISHED promptfoo 0.123.1 writes: config.tests
+    is the raw `file://` string and only row.testCase says what ran. Every
+    module that builds a contract key from an export must self-check against
+    THIS shape -- two call sites were missed by the first fix and died on the
+    first real run. cases: [(case_id, question, expected_substring), ...]."""
+    return {"evalId": "e", "config": {"description": desc,
+                                      "tests": ["file://cases/a.yaml"]},
+            "results": {"stats": {"successes": len(cases), "failures": 0, "errors": 0},
+                        "results": [
+                {"testCase": {"vars": {"case_id": c, "q": q},
+                              "assert": [{"type": "icontains", "value": a}],
+                              "options": {"provider": "openai:gpt-4o-2024-11-20"}},
+                 "vars": {"case_id": c}, "promptIdx": 0, "success": True,
+                 "gradingResult": {"componentResults": [
+                     {"assertion": {"type": "icontains"}, "pass": True}]}}
+                for c, q, a in cases]}}
 
 
 def _selfcheck():
@@ -483,17 +518,7 @@ def _selfcheck():
     # suite produced the same dataset_sha and n_cases_expected came out 0 --
     # a contract key that cannot tell two golden sets apart, failing silently.
     # The fix reads row.testCase instead; these assertions pin it.
-    def _export(cases, desc="s"):
-        return {"evalId": "e", "config": {"description": desc,
-                                          "tests": ["file://cases/a.yaml"]},
-                "results": {"stats": {"errors": 0}, "results": [
-                    {"testCase": {"vars": {"case_id": c, "q": q},
-                                  "assert": [{"type": "icontains", "value": a}],
-                                  "options": {"provider": "openai:gpt-4o-2024-11-20"}},
-                     "vars": {"case_id": c}, "promptIdx": 0, "success": True,
-                     "gradingResult": {"componentResults": [
-                         {"assertion": {"type": "icontains"}, "pass": True}]}}
-                    for c, q, a in cases]}}
+    _export = published_export
     import tempfile as _tf
     def _write(cases, desc="s"):
         pth = os.path.join(_tf.mkdtemp(), "e.json")
@@ -547,6 +572,21 @@ def _selfcheck():
                    "measured_at": "2020-01-01T00:00:00Z"}, f)
     ids, ok = read_quarantine(qp, 100)
     assert ids == ["a", "b"] and ok is None, (ids, ok)
+
+    # a measurement from a DIFFERENT contract is ignored outright: not its
+    # exclusions, not its power verdict
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with open(qp, "w") as f:
+        json.dump({"quarantined": ["a"], "power_ok": True, "churn_ok": True,
+                   "measured_at": now, "contract_key": {"dataset_sha": "old"}}, f)
+    assert read_quarantine(qp, 100, {"dataset_sha": "new"}) == ([], None)
+    assert read_quarantine(qp, 100, {"dataset_sha": "old"}) == (["a"], True)
+    assert read_quarantine(qp, 100) == (["a"], True)   # no key to compare: trust it
+
+    # the churn ceiling stops the gate even when power alone would pass
+    with open(qp, "w") as f:
+        json.dump({"power_ok": True, "churn_ok": False, "measured_at": now}, f)
+    assert read_quarantine(qp, 100) == ([], False)
 
     print("pair selfcheck OK")
     return 0

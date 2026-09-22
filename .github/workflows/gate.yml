@@ -31,6 +31,7 @@ jobs:
     # This job is seconds long, so it runs on every PR rather than only on upgrade
     # -- "only on upgrade" is a detection problem we do not need to have.
     runs-on: ubuntu-latest
+    timeout-minutes: 30   # a hung provider must not burn the 6-hour default
     outputs:
       version: ${{ steps.pin.outputs.version }}
       has_key: ${{ steps.key.outputs.present }}
@@ -109,6 +110,14 @@ jobs:
         env:
           PROMPTFOO_CONFIG_DIR: ${{ runner.temp }}/pfcontract-${{ github.run_id }}-${{ github.run_attempt }}
         run: bash regressgate/contract_test.sh
+      - name: Contract tests, python
+        # The twelve named tripwires, one per promptfoo behaviour the harness
+        # depends on. Run against the PUBLISHED binary on PATH -- the git
+        # checkout they were first written against does not enforce
+        # engines.node and resolves file:// tests, so it is not the artifact.
+        env:
+          PROMPTFOO_CONFIG_DIR: ${{ runner.temp }}/pfunit-${{ github.run_id }}-${{ github.run_attempt }}
+        run: python3 -m unittest -v tests.test_promptfoo_contract
 
       - name: End-to-end, offline
         # The whole pipeline -- preflight, promote, pair, gate, verdict cache,
@@ -138,8 +147,12 @@ jobs:
     # Skipped, not failed, when there is no key. A red X on a repo someone just
     # cloned says "this is broken"; a skipped job says "this part needs a
     # credential you have not given it", which is the truth.
-    if: needs.contract.outputs.has_key == 'true'
+    # ...but a PULL REQUEST with no key must FAIL, not skip. Secrets are absent
+    # on PRs from forks, and branch protection counts a skipped required check
+    # as passing -- so "skip when no key" alone is a fork-PR bypass of the gate.
+    if: needs.contract.outputs.has_key == 'true' || github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 30   # a hung provider must not burn the 6-hour default
     steps:
       - uses: actions/checkout@v4
         with:

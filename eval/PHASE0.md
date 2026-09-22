@@ -21,10 +21,12 @@ against a pinned judge, which is also the only way the judge-pinning path in
 `pair.py` gets exercised.
 
 **What "regression" means here.** The pass rate of the 300-case golden set at
-the pinned judge and pinned policy. A change to `system_prompt.md`,
-`policy.md`, the model, or any case invalidates the baseline by changing the
-contract key, and the gate refuses to compare across it rather than reporting
-a meaningless delta.
+the pinned judge and pinned policy. A change to any case, its
+assertions, the judge, or the promptfoo pin invalidates the baseline by
+changing the contract key, and the gate refuses to compare across it rather
+than reporting a meaningless delta. The system prompt, the policy text and the
+model under test are deliberately *not* in the key: they are the candidate, and
+a change to them is exactly what the gate measures.
 
 ## The 20 inputs it handles badly
 

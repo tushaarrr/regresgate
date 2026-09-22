@@ -53,7 +53,10 @@ def case_verdicts(rows):
 
 def analyse(paths):
     runs = [pair.load(p) for p in paths]
-    keys = [pair.contract_key(r["config"]) for r in runs]
+    # r["tests"] is what actually ran, read from the rows. The PUBLISHED
+    # promptfoo leaves config.tests as raw "file://" strings, and contract_key
+    # refuses to hash that -- so without this argument every real A/A run dies.
+    keys = [pair.contract_key(r["config"], r.get("tests")) for r in runs]
     if any(k != keys[0] for k in keys):
         raise SystemExit("::error::the A/A runs do not share one contract; "
                          "they are not replays of the same experiment")
@@ -173,6 +176,20 @@ def _selfcheck():
                 "discordant": 1, "compared": 100, "flips": {},
                 "unstable": [f"c{i}" for i in range(20)]})
     assert not r["exclusion_ok"], "20 of 100 cases excluded must breach the 15% cap"
+    # THE PUBLISHED EXPORT SHAPE, through analyse() itself. config.tests are raw
+    # file:// strings; only row.testCase says what ran. This call site was
+    # missed by the first contract-key fix and died on the first real A/A run.
+    import tempfile
+    d = tempfile.mkdtemp()
+    paths = []
+    for i in range(2):
+        p = os.path.join(d, f"aa{i}.json")
+        with open(p, "w") as f:
+            json.dump(pair.published_export([("a", "q1", "x"), ("b", "q2", "y")]), f)
+        paths.append(p)
+    a = analyse(paths)
+    assert a["n_cases"] == 2 and a["churn"] == 0.0, a
+    assert a["contract_key"]["dataset_sha"], a["contract_key"]
     print("quarantine selfcheck OK")
     return 0
 

@@ -14,6 +14,11 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$HERE")"
 PF_BIN=${PROMPTFOO_BIN:-promptfoo}
+# Fail here, not fifteen times downstream as "exited 127".
+command -v "${PF_BIN%% *}" >/dev/null 2>&1 || {
+  echo "e2e_test: '${PF_BIN%% *}' not found. npm install -g promptfoo@$(cat "$(dirname "$0")/promptfoo.version") or set PROMPTFOO_BIN" >&2
+  exit 2
+}
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 fails=0
 ok()  { echo "  ok   $1"; }
