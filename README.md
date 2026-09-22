@@ -275,3 +275,11 @@ not know it:
 
 The last two are the same lesson twice: your local promptfoo checkout is not
 the artifact CI installs, and local green proves nothing about CI.
+
+One more, about CI itself rather than promptfoo: **`cancel-in-progress: true`
+starves baseline promotion.** The push-to-main run is what promotes the next
+baseline, the eval takes minutes, and any push inside that window kills it.
+Four consecutive main runs were cancelled that way and not one promoted, after
+which every pull request REFUSEs forever — silently, correctly, and for a
+reason nothing reports. It is conditional on `pull_request` now, and
+`validate_workflows.py` fails if anyone sets it back.

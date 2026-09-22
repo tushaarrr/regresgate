@@ -14,7 +14,14 @@ permissions:
 
 concurrency:
   group: eval-gate-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Cancel superseded PULL REQUEST runs only. On main, cancel-in-progress is a
+  # slow-motion bootstrap deadlock: the push-to-main run is what PROMOTES the
+  # next baseline, the eval takes ~10 minutes, and any push inside that window
+  # kills it. Four consecutive main runs were cancelled that way and not one
+  # promoted a baseline -- after which every pull request REFUSEs forever,
+  # silently and correctly, for a reason nothing reports. Runs on main queue
+  # instead, which serialises the baseline writes as a bonus.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # Verified: telemetry is on by default. Off, everywhere, always.
@@ -108,6 +115,7 @@ jobs:
           python3 doctor.py --selfcheck
           python3 doctor.py || true      # reports; never the reason CI is red
           python3 scenarios.py > /dev/null
+          python3 validate_workflows.py --selfcheck
           python3 validate_workflows.py
           cd ../eval && python3 lint_cases.py --selfcheck
       - name: Contract test
@@ -216,8 +224,10 @@ jobs:
           # value from cache, and with --repeat the cached values are keyed by repeat
           # index, so bumping N mixes stale and fresh samples.
           # There is no --fail-on-error flag. The docs claim there is. Do not add it.
+          # -j 8: the default of 4 put 900 samples at ~16 minutes, which is long
+          # enough that runs were being superseded before they could finish.
           promptfoo eval -c eval/promptfooconfig.yaml \
-            --no-cache --repeat "$REPEAT" -o "$RUNNER_TEMP/head.json"
+            --no-cache --repeat "$REPEAT" -j 8 -o "$RUNNER_TEMP/head.json"
           code=$?
           set -e
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
