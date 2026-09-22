@@ -48,12 +48,29 @@ jobs:
         # contract under us between two runs of the same commit.
         run: npm install -g "promptfoo@${{ steps.pin.outputs.version }}"
       - name: Assert the installed version is the pinned one
+        env:
+          PINNED: ${{ steps.pin.outputs.version }}
         run: |
-          got="$(promptfoo --version)"
-          [ "$got" = "${{ steps.pin.outputs.version }}" ] || {
-            echo "::error::promptfoo resolved to $got, pinned ${{ steps.pin.outputs.version }}"
+          # Ask npm what it actually installed rather than the CLI what it
+          # thinks it is: `promptfoo --version` writes the version to stdout but
+          # node can also emit ExperimentalWarning lines, and a first run may
+          # print an update notice, so the CLI's output is not a clean channel
+          # for an equality test. npm ls is authoritative about the artifact.
+          got="$(npm ls -g --depth=0 --json promptfoo \
+                 | python3 -c 'import json,sys; print(json.load(sys.stdin)["dependencies"]["promptfoo"]["version"])')"
+          echo "npm reports promptfoo@$got, pinned $PINNED"
+          if [ "$got" != "$PINNED" ]; then
+            echo "::error::promptfoo resolved to $got, pinned $PINNED"
             exit 1
-          }
+          fi
+          # Belt and braces: the binary on PATH must be that same artifact.
+          cli="$(promptfoo --version 2>/dev/null | grep -Eo '^[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          echo "CLI reports: '$cli'"
+          if [ "$cli" != "$PINNED" ]; then
+            echo "::error::the promptfoo on PATH reports '$cli', not $PINNED"
+            promptfoo --version || true
+            exit 1
+          fi
       - name: Lint the workflows
         # These files had never been schema-checked. A typo in a workflow is a
         # gate that silently does not run, which is the worst failure mode here.
@@ -61,6 +78,14 @@ jobs:
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
           ./actionlint -color
+      - name: Install the validator's one dependency
+        # validate_workflows.py is the only file in the repo that is not stdlib
+        # only -- it needs a YAML parser to assert the workflows' env discipline,
+        # which actionlint's schema check does not cover. It is a dev tool, not
+        # part of the harness, so the dependency stays here rather than in the
+        # package.
+        run: python3 -m pip install --quiet pyyaml
+
       - name: Harness self-checks
         # Every module carries its own assertions; running them here means a
         # broken harness fails before it can mis-report a quality verdict.

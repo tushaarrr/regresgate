@@ -29,6 +29,18 @@ prompts: ['{{x}}']
 tests: []
 Y
 
+# The runtime contract, learned the hard way in CI. promptfoo 0.123.1 declares
+# engines.node ">=22.22.0" and the PUBLISHED bin enforces it at startup: below
+# that it writes a notice to STDERR and exits 1, so `promptfoo --version` prints
+# NOTHING on stdout. A version assert then compares "" against the pin and fails
+# with no hint about node. The git checkout does NOT enforce this, so a local
+# run on an old node is green while CI is red -- test the published contract.
+v="$($PF --version 2>/dev/null)"
+case "$v" in
+  [0-9]*.[0-9]*.[0-9]*) ok "--version prints a bare semver on stdout ($v)" ;;
+  *) bad "--version printed '$v' on stdout; empty almost always means the node runtime is below engines.node >=22.22.0 (node $(node --version 2>/dev/null))" ;;
+esac
+
 $PF eval -c "$TMP/pass.yaml" --no-cache -o "$TMP/pass.json" >/dev/null 2>&1
 [ $? -eq 0 ] && ok "all-pass eval exits 0" || bad "all-pass eval did not exit 0"
 
