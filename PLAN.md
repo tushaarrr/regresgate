@@ -60,13 +60,18 @@ dependency, no TypeScript, raw `sqlite3`, no ORM.
 
 ```
 Trigger (Actions push + schedule)
-  → Orchestrator (runner.py: argv, env discipline, outcome classification)
+  → preflight.py (refuse `sharing:`, .junit.xml, inherited threshold env)
+  → Orchestrator (runner.py: argv, env discipline, classify() — the ONE classifier)
     → promptfoo CLI (pinned, --no-cache, --no-write)
       → parse.py (rows → cases; assert-set leaves; UNSCORED ≠ FAILED)
-        → store.py (SQLite: runs, case_results, assertion_results, baselines, decisions)
+        → fetch_baseline.py (baseline keyed by CONTRACT HASH; a miss is a REFUSE)
+        → pair.py (per-sample pairs; contract_key; manifest + quarantine + power)
           → gate.py (McNemar exact + CI + quarantine) ── verdict_cache ──┐
             → alert (PR comment / Slack webhook you write)               │
                                                                  retry returns stored verdict
+
+  nightly only: drift_monitor.py record → store.py → check (EWMA + model id + dead-man)
+                                                     ^ deliberately NOT behind the cache
 ```
 
 The **verdict cache sits in front of the gate**, not behind it. See §6.
@@ -316,6 +321,7 @@ assertion-invisible, and the version pin.
 | D explained by quarantine | 1, 14, 300 | 0.000488 | (−6.82, −1.85) | COMMENT |
 | Small-suite drop | 0, 5, 60 | 0.03125 | (−15.33, −1.34) | **BLOCK** |
 | Pure improvement | 17, 4, 300 | 0.999255 | (+1.38, +7.29) | PASS |
+| B, below the power floor | 4, 17, 300 | 0.003599 | (−7.29, −1.38) | COMMENT |
 
 The last two are the regression tests for the sidedness bug. Under the direction-blind
 implementation they were PASS and COMMENT respectively — i.e. a real regression shipped and an
@@ -337,9 +343,26 @@ Model drift fires at **flat pass rate** — 100.0% → 100.0%, `served-model-202
 `served-model-2026-03`, `quality_moved: false`. That is the observation the project exists to make.
 The dead-man's switch returns `ALERT_NO_NIGHTLY` before tonight's run and `OK` after.
 
+### End-to-end, against the real binary
+
+`e2e_test.sh` runs the assembled pipeline and asserts 16 outcomes — `0 failure(s)`:
+
+```
+  ok   real regression -> BLOCK, exit 20
+  ok   re-run of the same commit replayed the stored BLOCK
+  ok   new commit re-measured -> PASS
+  ok   below the power floor -> COMMENT, with the reason in the comment
+  ok   a changed assertion -> REFUSE, exit 30 (no delta invented)
+  ok   served model swapped at a FLAT pass rate and the monitor caught it
+```
+
+Its first run found a crash no module self-check covered: `read_quarantine`
+returned a bare `[]` with no quarantine file while its caller unpacked two values.
+That is the argument for the phase, not a footnote to it.
+
 ### Workflows
 
-`ALL WORKFLOW ASSERTIONS PASSED` — both files parse; telemetry disabled at workflow scope;
+`ALL WORKFLOW ASSERTIONS PASSED`, and `actionlint` reports 0 findings on both files. — both files parse; telemetry disabled at workflow scope;
 `PROMPTFOO_PASS_RATE_THRESHOLD` never set; `--fail-on-error` never used; per-run
 `PROMPTFOO_CONFIG_DIR`; `cancel-in-progress: false` on drift; 30h dead-man's switch present.
 
@@ -376,37 +399,80 @@ Each of these exists because something broke without it.
 
 ## 8. Build phases (revised)
 
-**Phase 0 — pick the feature.** Unchanged. Name the feature, its system prompt, and 20 inputs you
-have seen it handle badly.
+Phases 1–5 are built and run end to end against the real binary. **Phase 0 is the one thing
+blocking everything else**, and no amount of harness work substitutes for it: until the feature and
+its 300 cases exist, the suite is a 12-case placeholder with power@−5pp = 0.001 and the gate
+correctly refuses to block on anything.
 
-**Phase 1 — golden set + run store.** 300 cases with an explicit `case_id` var. Schema first,
-including the `UNSCORED` state and a nullable `repeat_index` fed by provider echo.
-*Done when:* one row per case per repeat, and a second run against the same commit diffs by hand.
+**Phase 0 — pick the feature. ← THE ONLY OPEN PHASE.** Name the feature, its system prompt, and 20
+inputs you have seen it handle badly. Everything downstream is built and waiting on this.
 
-**Phase 2 — flaky quarantine + churn.** Five A/A self-runs at production temperature; anything not
-unanimous is quarantined. **Publish churn and power@−5pp** — these are now gates, not diagnostics.
-*Done when:* churn ≤ 6% and power@−5pp ≥ 0.6 on the gating suite.
+**Phase 1 — golden set + run store. BUILT** (`parse.py`, `store.py`, `eval/`), *placeholder data.*
+Schema carries the `UNSCORED` state and a nullable `repeat_index` fed by provider echo; `store.py`
+grew a non-destructive `open_db()` beside the destructive demo `connect()`, because a nightly that
+wipes the series it extends reports OK forever. `eval/provider.py` pins the three things a real
+provider must keep: echo `__repeatIndex`, echo the **served** model id, keep `case_id` explicit.
+*Done when:* 300 real cases replace the placeholder twelve.
 
-**Phase 3 — the pairer.** *New phase, and the current gap.* The pairer emits per-**sample** pairs
-keyed `(case_id, prompt_idx, repeat_index)`; it must handle `repeat_index = NULL` on error rows and
-exclude `UNSCORED` from the tally. Both workflows reference `pair.py`, `fetch_baseline.py`,
-`cases.manifest.json` and `quarantine.json` — none exist yet.
-*Done when:* a real two-run pairing produces b/c counts you can verify by hand.
+**Phase 2 — flaky quarantine + churn. BUILT** (`quarantine.py`). Five A/A self-runs in, churn +
+quarantine + power@−5pp out, with the 6% ceiling, the 15% union cap and the 0.60 floor enforced as
+exit codes. Power is computed in **cases, not paired samples** — repeats of one case are not
+independent draws and counting them as such overstates it.
+*Done when:* churn ≤ 6% **and** power@−5pp ≥ 0.6 on a real gating suite.
 
-**Phase 4 — the gate.** McNemar exact (directional) + closed-form CI + the three-part rule, behind
-the verdict cache. *Done when:* a one-word prompt change blocks, a cosmetic change passes, **and a
-re-run of the blocked PR returns the cached BLOCK rather than re-rolling.**
+**Phase 3 — the pairer. BUILT** (`pair.py`, `fetch_baseline.py`, `cases.manifest.json`,
+`quarantine.json`). Pairs are keyed `(case_id, prompt_idx, repeat_slot)`. Two rules the draft did
+not settle:
 
-**Phase 5 — the drift cron.** Nightly on an unchanged commit, MR/d₂ σ, dead-man's switch at 30h,
-alert on any `model_id` change independent of quality.
-*Done when:* 40 nights of history, a fitted σ from your own data, and a simulated 5pp injection
-fires within three nights.
+- `repeat_slot` is the echoed `__repeatIndex` when *every* row in the group has one, else the
+  ordinal position within the group. Repeats are i.i.d. draws, so which head repeat meets which
+  baseline repeat carries no information *even when the index is echoed*; what is never safe is
+  **inferring** the slot from the row index. A duplicated echoed index is a harness error, not a
+  silently dropped row.
+- Suite identity rides in `contract_key` (`dataset_sha` and `assertions_sha` kept apart so a
+  reviewer sees which half moved). Baselines are stored under the hash of that key, so the lookup
+  itself enforces comparability and a drifted contract simply misses → REFUSE.
+
+*Done:* a real two-run pairing gives 36 pairs over 12 cases × 3 repeats, b/c verified by hand.
+
+**Phase 4 — the gate. BUILT** (`gate.py` behind `verdict_cache.py`). Directional exact McNemar +
+closed-form CI + the three-part rule; only `PASS`/`COMMENT`/`BLOCK` are cached, because `REFUSE`,
+`HARD_FAIL` and `HARNESS_ERROR` describe a fixable state of the world and must re-measure after the
+fix. Guardrail B is wired in here rather than left as a quarterly report: below the power floor —
+**or last measured over 100 days ago**, since "publish it quarterly" is not enforcement unless
+staleness counts as unmeasured — `BLOCK` degrades to `COMMENT` with the reason in the comment.
+*Done:* a real regression BLOCKs; re-running the same commit replays the cached BLOCK **even after
+the code is secretly fixed**; a new commit re-measures to PASS.
+
+**Phase 5 — the drift cron. BUILT** (`drift_monitor.py`), *awaiting real nights.* EWMA λ=0.2 L=3.0
+with MR/d₂ σ, model drift on echoed identity, dead-man at 30h. A harness-errored night is a **hole**
+in the series, never a low point: averaging an outage in drags the centre line down and then stops
+alarming once the outage is the new normal.
+*Done in simulation:* 40 in-control nights raise no alarm at σ̂ = 0.44pp, an injected −5pp break is
+caught in 1 night, and a served-model swap fires at 100.0% → 100.0%. *Done for real when:* 40
+nights of your own history and a fitted σ from your own data.
 
 **Phase 6 — triage agent.** Read-only; appends to the alert; never decides the gate. Do not start
 until the store holds judge rationale text.
 
 **Phase 7 — optional, logged not controlled.** Fixed-K adjudication and the escape-rate monitor,
 writing to a JSONL log. No control path.
+
+**Newly learned in the build — three things worth carrying forward.**
+
+1. **Integration found what unit tests could not.** The first end-to-end run crashed on a path no
+   self-check covered: `read_quarantine` returned a bare `[]` when the file was absent while its
+   caller unpacked two values. Every module's own assertions were green. `e2e_test.sh` now runs the
+   whole pipeline against the real binary and asserts 16 outcomes.
+2. **One classifier, one validator, one unit.** `runner.classify()` is now the single place a run
+   becomes OK/TESTS_FAILED/HARNESS_ERROR, so the nightly recorder cannot disagree with the gate
+   about whether an errored row is a failure. `validate_workflows.py` resolves against the repo
+   root, not the cwd — it had been silently unrunnable from anywhere but one directory.
+   `--expected-tests` counts **rows**; the store's `n_cases_*` columns count **cases**; the
+   docstring now says so where the two meet.
+3. **The drift cron must not use the verdict cache.** On a quiet week `main` does not move, so the
+   cache key is identical every night and night one's verdict would replay forever. The cache
+   defends a PR against re-rolling; the nightly *must* re-roll. Same function, opposite requirement.
 
 **Cut from the original plan:** the DSPy/GEPA auto-fix phase is unchanged in principle but moves
 behind Phase 7 — it depends on the rationale corpus, which depends on the judge being pinned and
