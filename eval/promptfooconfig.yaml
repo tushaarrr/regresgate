@@ -1,48 +1,47 @@
-# PLACEHOLDER golden set (Phase 0/1). Twelve cases so the pipeline is runnable
-# end to end with no API key. The plan sizes the real gating suite at 300 --
-# check_power_floor() will honestly report this one as far too small to gate on.
+# The Meridian Support Assistant golden set. See PHASE0.md for what this
+# measures and why; policy.md is the ground truth every assertion traces to.
 #
-# NEVER add `sharing:` to this file. Verified against a local counting server: it
-# POSTs the entire eval payload off-box, exits 0, and warns about nothing.
-# preflight.py refuses to run a config that sets it.
-description: regressgate placeholder suite
+# NEVER add `sharing:` to this file. Verified against a local counting server:
+# it POSTs the entire eval -- vars AND outputs -- off-box, exits 0, and warns
+# about nothing. preflight.py refuses to run a config that sets it.
+description: Meridian Support Assistant
 
 providers:
+  # A python provider, not the native openai one, because the harness needs
+  # three things the native provider cannot give it: __repeatIndex echoed into
+  # metadata (promptfoo strips it from graders, so this is the only place it is
+  # observable), the SERVED model id from the response rather than the one we
+  # asked for (drift detection fires on that string alone), and case_id kept as
+  # an explicit var.
   - id: file://provider.py
 
 prompts:
-  - 'Customer asks: {{question}}'
+  - '{{question}}'
 
-# Pin the grader here the moment a model-graded assertion appears. llm-rubric
-# otherwise picks its judge from whichever API keys are in the environment, so
-# the suite silently measures a different thing on a different machine, and
-# pair.py refuses to build a contract key.
-# defaultTest:
-#   options:
-#     provider: openai:gpt-4o-2024-11-20
+defaultTest:
+  options:
+    # THE JUDGE, PINNED TO A DATED SNAPSHOT. Without this, llm-rubric picks its
+    # grader from whichever API keys happen to be in the environment, so the
+    # same suite measures a different thing on two machines and the drift is
+    # invisible. pair.py refuses to build a contract key for a suite that uses
+    # model-graded assertions with no pinned judge, so removing this line does
+    # not silently degrade the gate -- it stops it.
+    # The judge is deliberately a stronger model than the one under test.
+    provider: openai:gpt-4o-2024-11-20
 
+# Ten files by failure category, not one flat list. This is what lets triage
+# and a human say "the regression is entirely in injection resistance" rather
+# than "41 cases broke". promptfoo resolves these into config.tests as literal
+# dicts (verified), so pair.py's dataset_sha and assertions_sha hash the real
+# content and any edit re-baselines rather than silently moving the target.
 tests:
-  - vars: {case_id: refund-window,   question: How long do I have to ask for a refund?}
-    assert: [{type: icontains, value: '30 days'}]
-  - vars: {case_id: refund-partial,  question: Can I get a partial refund?}
-    assert: [{type: icontains, value: partial}]
-  - vars: {case_id: cancel-self,     question: How do I cancel my plan?}
-    assert: [{type: icontains, value: 'Settings'}]
-  - vars: {case_id: cancel-refund,   question: Does cancelling refund my last charge?}
-    assert: [{type: icontains, value: 'does not refund'}]
-  - vars: {case_id: invoice-vat,     question: How do I put my VAT number on invoices?}
-    assert: [{type: icontains, value: VAT}]
-  - vars: {case_id: invoice-past,    question: Where are my old invoices?}
-    assert: [{type: icontains, value: 'invoice history'}]
-  - vars: {case_id: seat-add,        question: How do I add a teammate?}
-    assert: [{type: icontains, value: prorated}]
-  - vars: {case_id: seat-remove,     question: What happens if I remove a seat?}
-    assert: [{type: icontains, value: credit}]
-  - vars: {case_id: sso-setup,       question: Do you support SSO?}
-    assert: [{type: icontains, value: SAML}]
-  - vars: {case_id: sso-scim,        question: Can you provision users automatically?}
-    assert: [{type: icontains, value: SCIM}]
-  - vars: {case_id: export-data,     question: How do I export my data?}
-    assert: [{type: icontains, value: CSV}]
-  - vars: {case_id: delete-account,  question: Is account deletion permanent?}
-    assert: [{type: icontains, value: permanent}]
+  - file://cases/policy-lookup.yaml
+  - file://cases/numeric.yaml
+  - file://cases/multipart.yaml
+  - file://cases/not-in-policy.yaml
+  - file://cases/out-of-scope.yaml
+  - file://cases/false-premise.yaml
+  - file://cases/authority.yaml
+  - file://cases/injection.yaml
+  - file://cases/clarify.yaml
+  - file://cases/safety.yaml

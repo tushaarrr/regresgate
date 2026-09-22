@@ -1,0 +1,230 @@
+# numeric -- answers that are a number, including arithmetic off the policy.
+#
+# Facts these cases are traceable to (policy.md):
+#   Starter $19/seat/mo, Team $49/seat/mo, Enterprise custom (quoted by sales)
+#   annual = 2 months free -> a seat-year is 10x the monthly rate
+#     Starter seat-year $190, Team seat-year $490
+#   trial 14 days | refund 30 days | price-change notice 30 days
+#   3 retries over 7 days (day 1, day 3, day 7) | read-only data kept 60 days
+#   account deletion removes data after 30 days
+#   nonprofit 30%, education 50%, no stacking
+#   first response: Starter next business day, Team 8 business hours,
+#     Enterprise 1 hour sev1
+#
+# Two deliberate non-assertions, so nobody "fixes" them later:
+#   1. No case forbids the 12-month figure (e.g. $1,176 for 2 Team seats).
+#      The model routinely shows "49 x 2 x 12 = $1,176, but annual is 10
+#      months, so $980" -- correct working, and forbidding it would fail a
+#      right answer. The exact total is the assertion; an answer that stops at
+#      the 12-month figure simply never contains it.
+#   2. Negatives only name strings that cannot appear in ANY correct answer
+#      (a rate from the other discount tier, a dollar figure on an Enterprise
+#      quote, an invented limit). Everything else is a positive.
+
+# fails when: quotes the Team price, or the annual seat-year, for a plain
+#             Starter monthly lookup. \b rejects "$190".
+- vars: {case_id: num-001, question: "how much is starter per seat"}
+  assert:
+    - {type: regex, value: '\$19\b'}
+
+# fails when: quotes the Starter price for Team. \b rejects "$490".
+- vars: {case_id: num-002, question: "Whats the monthly price of Team for one seat?"}
+  assert:
+    - {type: regex, value: '\$49\b'}
+
+# fails when: invents a per-seat number for Enterprise instead of routing to
+#             sales. Any dollar figure at all is the failure.
+- vars: {case_id: num-003, question: "How much does Enterprise cost per seat per month?"}
+  assert:
+    - {type: icontains-any, value: ["quoted by sales", "custom", "sales team", "sales"]}
+    - {type: not-regex, value: '\$\s?\d'}
+
+# fails when: 49 x 12 = $588 -- billing the annual question at twelve months.
+- vars: {case_id: num-004, question: "If I pay for Team annually, what's the cost per seat for the whole year?"}
+  assert:
+    - {type: icontains-any, value: ["490", "four hundred ninety"]}
+
+# fails when: 19 x 12 = $228, or answering with the $19 monthly rate only.
+- vars: {case_id: num-005, question: "starter billed yearly - total per seat for 12 months?"}
+  assert:
+    - {type: icontains-any, value: ["190", "one hundred ninety"]}
+
+# fails when: 3 x 19 x 12 = $684 instead of 3 x 19 x 10.
+- vars: {case_id: num-006, question: "what do I pay for 3 seats for a year on Starter"}
+  assert:
+    - {type: icontains-any, value: ["570", "$570.00"]}
+
+# fails when: 12 x 49 x 12 = $7,056, or answering $588 (one seat-year).
+- vars: {case_id: num-007, question: "12 seats on Team annually — total please"}
+  assert:
+    - {type: icontains-any, value: ["5,880", "5880"]}
+
+# fails when: quotes the annual figure, or per-seat instead of the 5-seat total.
+- vars: {case_id: num-008, question: "We have 5 people on Team, billed monthly. What's the total each month?"}
+  assert:
+    - {type: icontains-any, value: ["245", "two hundred forty-five"]}
+
+# fails when: invents a usage limit. The policy has no API quota anywhere, so
+#             any three-digit number in this answer is a hallucination.
+- vars: {case_id: num-009, question: "How many API calls per month do we get on Team?"}
+  assert:
+    - {type: icontains-any, value: ["not in our policy", "don't have that", "do not have that", "doesn't cover", "not something I have"]}
+    - {type: not-regex, value: '\d{3,}'}
+
+# fails when: says you pay for 12 months, i.e. loses the 2-months-free rule.
+- vars: {case_id: num-010, question: "With annual billing how many months do I actually pay for?"}
+  assert:
+    - {type: icontains-any, value: ["10 months", "ten months"]}
+
+# fails when: 8 x 49 x 12 = $4,704.
+- vars: {case_id: num-011, question: "hi there! we're moving 8 seats onto Team and paying yearly. what's the damage?"}
+  assert:
+    - {type: icontains-any, value: ["3,920", "3920"]}
+
+# fails when: answers "2 months free" without doing 588 - 490 = $98.
+#             \b rejects "$980" and "$98x".
+- vars: {case_id: num-012, question: "How much do I save per seat per year by paying annually on Team instead of monthly?"}
+  assert:
+    - {type: regex, value: '\$98\b'}
+
+# fails when: 40 x 19 x 12 = $9,120.
+- vars: {case_id: num-013, question: "40 seats, Starter, annual contract. Total?"}
+  assert:
+    - {type: icontains-any, value: ["7,600", "7600"]}
+
+# fails when: stops at 49 x 2 x 12 = $1,176 and never applies 2 months free.
+- vars: {case_id: num-014, question: "just 2 seats on team for a year, how much"}
+  assert:
+    - {type: icontains-any, value: ["980", "nine hundred eighty"]}
+
+# fails when: applies the 30% nonprofit rate ($34.30) to an education customer,
+#             or quotes the undiscounted $49.
+- vars: {case_id: num-015, question: "we qualify for the education discount. what does Team cost per seat per month for us?"}
+  assert:
+    - {type: icontains-any, value: ["24.50", "24.5"]}
+    - {type: not-icontains, value: "34.30"}
+
+# fails when: discounts the 12-month figure (588 x 0.5 = $294) instead of the
+#             10-month seat-year, or returns the monthly $24.50 as the answer.
+- vars: {case_id: num-016, question: "Education discount, Team plan, billed annually. Price per seat for the year?"}
+  assert:
+    - {type: icontains-any, value: ["245", "two hundred forty-five"]}
+
+# fails when: applies 50% ($9.50) instead of the 30% nonprofit rate.
+- vars: {case_id: num-017, question: "nonprofit here — what's Starter per seat monthly after our discount?"}
+  assert:
+    - {type: icontains-any, value: ["13.30", "13.3"]}
+    - {type: not-icontains, value: "9.50"}
+
+# fails when: leaves the arithmetic as a formula ("49 x 10 x 0.7") instead of
+#             stating $343, or discounts 12 months (588 x 0.7 = $411.60).
+- vars: {case_id: num-018, question: "Nonprofit discount on Team annual — per seat per year?"}
+  assert:
+    - {type: icontains-any, value: ["343", "three hundred forty-three"]}
+
+# fails when: adds the two rates to 80% instead of saying discounts do not
+#             stack. "80%" itself is not forbidden -- a correct answer may well
+#             quote it back to reject it.
+- vars: {case_id: num-019, question: "we're a nonprofit AND a school, so 30 + 50 = 80% off right?"}
+  assert:
+    - {type: icontains-any, value: ["do not stack", "don't stack", "doesn't stack", "cannot be combined", "can't be combined", "not stack"]}
+    - {type: icontains-any, value: ["50%", "50 percent"]}
+
+# fails when: discounts the per-seat seat-year ($95) and forgets to multiply by
+#             10 seats, or discounts 12 months (10 x 19 x 12 x 0.5 = $1,140).
+- vars: {case_id: num-020, question: "10 seats, Starter, annual, with the education discount. Total for the year?"}
+  assert:
+    - {type: icontains-any, value: ["950", "nine hundred fifty"]}
+
+# fails when: 20 x 49 = $980 with the discount dropped, or the 50% rate applied.
+- vars: {case_id: num-021, question: "20 seats on Team monthly with the nonprofit discount, what's the monthly bill"}
+  assert:
+    - {type: icontains-any, value: ["686", "six hundred eighty-six"]}
+
+# fails when: answers with the 30-day refund window instead of the trial length.
+- vars: {case_id: num-022, question: "how many days is the trail?"}
+  assert:
+    - {type: icontains-any, value: ["14 days", "14-day", "fourteen days"]}
+    - {type: not-icontains, value: "30 days"}
+
+# fails when: quotes the 14-day trial as the refund window.
+- vars: {case_id: num-023, question: "I bought 3 weeks ago and want my money back. how many days do i have to ask for a refund?"}
+  assert:
+    - {type: icontains-any, value: ["30 days", "30-day", "thirty days"]}
+    - {type: not-icontains, value: "14 days"}
+
+# fails when: invents a retry count (2, 5, "until it succeeds").
+- vars: {case_id: num-024, question: "how many times do you retry a failed card?"}
+  assert:
+    - {type: icontains-any, value: ["3 times", "3 retries", "3 attempts", "three"]}
+
+# fails when: puts the third retry on day 3, day 5 or day 14 -- i.e. reads
+#             "3 retries over 7 days" as evenly spaced.
+- vars: {case_id: num-025, question: "my card failed on the 1st. what day does the third retry land on?"}
+  assert:
+    - {type: icontains-any, value: ["day 7", "7th day", "the 7th", "day seven", "seventh day"]}
+    - {type: not-icontains, value: "day 14"}
+
+# fails when: accepts the customer's wrong $29 rate and bills 29 x 10 = $290
+#             instead of correcting to $19 and answering $190.
+- vars: {case_id: num-026, question: "I'm on Starter at $29 per seat — what's that for a year for 1 seat?"}
+  assert:
+    - {type: icontains-any, value: ["190", "one hundred ninety"]}
+    - {type: not-icontains, value: "290"}
+
+# fails when: accepts "3 months free" and bills 4 x 49 x 9 = $1,764.
+#             "3 months free" is not forbidden -- correcting it out loud is the
+#             right behaviour and may repeat the phrase.
+- vars: {case_id: num-027, question: "I thought annual was 3 months free. 4 seats on Team for the year, what do I owe?"}
+  assert:
+    - {type: icontains-any, value: ["1,960", "1960"]}
+    - {type: icontains-any, value: ["2 months", "two months"]}
+
+# fails when: quotes the 30-day deletion window instead of the 60-day
+#             read-only retention.
+- vars: {case_id: num-028, question: "account went read-only. how long before you delete my data?"}
+  assert:
+    - {type: icontains-any, value: ["60 days", "60-day", "sixty days"]}
+
+# fails when: quotes the 60-day read-only retention for a deleted account.
+- vars: {case_id: num-029, question: "If I delete my account, how many days until the data is actually gone?"}
+  assert:
+    - {type: icontains-any, value: ["30 days", "30-day", "thirty days"]}
+
+# fails when: invents a notice period, or promises no price change at all.
+- vars: {case_id: num-030, question: "how much notice do you give before a price increase?"}
+  assert:
+    - {type: icontains-any, value: ["30 days", "30-day", "thirty days"]}
+
+# fails when: gives the 50% education rate for the nonprofit question.
+- vars: {case_id: num-031, question: "what % is the nonprofit discount"}
+  assert:
+    - {type: icontains-any, value: ["30%", "30 percent"]}
+
+# fails when: gives the 30% nonprofit rate for the education question.
+- vars: {case_id: num-032, question: "education discount percentage?"}
+  assert:
+    - {type: icontains-any, value: ["50%", "50 percent"]}
+
+# fails when: gives Starter's next-business-day or Enterprise's 1 hour to a
+#             Team customer.
+- vars: {case_id: num-033, question: "We're on Team. How fast do you respond to a ticket?"}
+  assert:
+    - {type: icontains-any, value: ["8 business hours", "eight business hours"]}
+
+# fails when: gives Team's 8 business hours as the Enterprise sev1 SLA.
+- vars: {case_id: num-034, question: "Enterprise sev1 — what's the first response SLA in hours?"}
+  assert:
+    - {type: icontains-any, value: ["1 hour", "one hour"]}
+
+# fails when: picks a plan on the customer's behalf and quotes a total. Plan is
+#             never stated, so the number is unknowable. Needs a rubric: the
+#             failure is "assumed a plan", which no string test can see.
+- vars: {case_id: num-035, question: "what will 6 seats cost me for a year?"}
+  assert:
+    - type: llm-rubric
+      value: >-
+        The reply does NOT state a total price for 6 seats. Instead it asks the
+        customer which plan they are on (Starter, Team or Enterprise), as a
+        single clarifying question, because the price depends on the plan.
+        Pass only if no dollar total for 6 seats is given.

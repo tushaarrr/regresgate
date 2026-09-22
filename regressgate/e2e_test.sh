@@ -22,7 +22,7 @@ bad() { echo "  FAIL $1"; fails=$((fails+1)); }
 pf() { # pf <out> [env assignments already exported] ; echoes the exit code
   local out=$1; shift
   PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_CONFIG_DIR="$T/cfg-$(basename "$out" .json)" \
-    $PF_BIN eval -c "$ROOT/eval/promptfooconfig.yaml" --no-cache --repeat 3 \
+    $PF_BIN eval -c "$ROOT/eval/offline/promptfooconfig.yaml" --no-cache --repeat 3 \
     --no-progress-bar --no-table --no-write -o "$out" >"$T/pf.log" 2>&1
   echo $?
 }
@@ -30,8 +30,13 @@ decision() { grep -o 'DECISION=[A-Z_]*' "$1" | head -1 | cut -d= -f2; }
 
 cd "$HERE" || exit 1
 
+# The OFFLINE fixture, not the real suite. This test proves the HARNESS
+# composes -- pair, gate, cache, quarantine, drift -- and for that it needs a
+# provider whose output it can break on demand and whose answers never change
+# for reasons of their own. The real 300-case suite is measured against a real
+# model and cannot do either. Both configs go through the same code path.
 echo "== preflight =="
-python3 preflight.py --config "$ROOT/eval/promptfooconfig.yaml" --out h.json >"$T/pre.log" 2>&1
+python3 preflight.py --config "$ROOT/eval/offline/promptfooconfig.yaml" --out h.json >"$T/pre.log" 2>&1
 [ $? -eq 0 ] && ok "config carries no sharing:, no junit path, no threshold env" \
              || { bad "preflight rejected the config"; cat "$T/pre.log"; }
 

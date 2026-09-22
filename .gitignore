@@ -5,6 +5,9 @@
 !.env.example
 eval/.env.ci
 
+# Working notes, kept local on purpose.
+RESUME.md
+
 # Local tooling
 .venv/
 __pycache__/

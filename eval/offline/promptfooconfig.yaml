@@ -1,0 +1,48 @@
+# PLACEHOLDER golden set (Phase 0/1). Twelve cases so the pipeline is runnable
+# end to end with no API key. The plan sizes the real gating suite at 300 --
+# check_power_floor() will honestly report this one as far too small to gate on.
+#
+# NEVER add `sharing:` to this file. Verified against a local counting server: it
+# POSTs the entire eval payload off-box, exits 0, and warns about nothing.
+# preflight.py refuses to run a config that sets it.
+description: regressgate placeholder suite
+
+providers:
+  - id: file://provider.py
+
+prompts:
+  - 'Customer asks: {{question}}'
+
+# Pin the grader here the moment a model-graded assertion appears. llm-rubric
+# otherwise picks its judge from whichever API keys are in the environment, so
+# the suite silently measures a different thing on a different machine, and
+# pair.py refuses to build a contract key.
+# defaultTest:
+#   options:
+#     provider: openai:gpt-4o-2024-11-20
+
+tests:
+  - vars: {case_id: refund-window,   question: How long do I have to ask for a refund?}
+    assert: [{type: icontains, value: '30 days'}]
+  - vars: {case_id: refund-partial,  question: Can I get a partial refund?}
+    assert: [{type: icontains, value: partial}]
+  - vars: {case_id: cancel-self,     question: How do I cancel my plan?}
+    assert: [{type: icontains, value: 'Settings'}]
+  - vars: {case_id: cancel-refund,   question: Does cancelling refund my last charge?}
+    assert: [{type: icontains, value: 'does not refund'}]
+  - vars: {case_id: invoice-vat,     question: How do I put my VAT number on invoices?}
+    assert: [{type: icontains, value: VAT}]
+  - vars: {case_id: invoice-past,    question: Where are my old invoices?}
+    assert: [{type: icontains, value: 'invoice history'}]
+  - vars: {case_id: seat-add,        question: How do I add a teammate?}
+    assert: [{type: icontains, value: prorated}]
+  - vars: {case_id: seat-remove,     question: What happens if I remove a seat?}
+    assert: [{type: icontains, value: credit}]
+  - vars: {case_id: sso-setup,       question: Do you support SSO?}
+    assert: [{type: icontains, value: SAML}]
+  - vars: {case_id: sso-scim,        question: Can you provision users automatically?}
+    assert: [{type: icontains, value: SCIM}]
+  - vars: {case_id: export-data,     question: How do I export my data?}
+    assert: [{type: icontains, value: CSV}]
+  - vars: {case_id: delete-account,  question: Is account deletion permanent?}
+    assert: [{type: icontains, value: permanent}]
