@@ -399,7 +399,7 @@ Each of these exists because something broke without it.
 
 ## 8. Build phases (revised)
 
-Phases 1–5 are built and run end to end against the real binary. **Phase 0 is the one thing
+Phases 1–7 are built and run end to end against the real binary. **Phase 0 is the one thing
 blocking everything else**, and no amount of harness work substitutes for it: until the feature and
 its 300 cases exist, the suite is a 12-case placeholder with power@−5pp = 0.001 and the gate
 correctly refuses to block on anything.
@@ -452,13 +452,28 @@ alarming once the outage is the new normal.
 caught in 1 night, and a served-model swap fires at 100.0% → 100.0%. *Done for real when:* 40
 nights of your own history and a fitted σ from your own data.
 
-**Phase 6 — triage agent.** Read-only; appends to the alert; never decides the gate. Do not start
-until the store holds judge rationale text.
+**Phase 6 — triage agent. BUILT** (`triage.py`), *not wired.* Reads the judge rationale the store
+already keeps and appends a grouped section under the comment the gate rendered. Grouping is the
+failing assertion type plus a digit-stripped rationale prefix — no clustering library, no model
+call, nothing that can itself be wrong in an interesting way. Cases the store has already seen flip
+are split out and explicitly *not* recommended for quarantine, citing the 0.866 → 0.405 power cost.
+Read-only holds by construction, not intention: the store is opened `mode=ro`, the comment `"a"`,
+and `main()` returns 0 on every path so a reading aid can never emit an exit code the gate owns.
+*Not wired on purpose:* nothing on the PR path records the head run into the store
+(`store.ingest` runs only from the nightly), and `icontains` reasons are not rationale. Wire it
+once Phase 0 lands a real suite with a pinned judge.
 
-**Phase 7 — optional, logged not controlled.** Fixed-K adjudication and the escape-rate monitor,
-writing to a JSONL log. No control path.
+**Phase 7 — logged, never controlled. BUILT** (`adjudicate.py`, `escape_monitor.py`). Fixed K=20,
+no sequential stopping, all replicates **pooled** into one tally and tested once — best-of-k is the
+attack, and pooling one measurement K times is amplification, so K distinct paths *and* K distinct
+head eval_ids are required. Every record carries the honest ceiling: the adjudicator converges on
+`d_measured`, not `d_true`, so at a 2pp construct gap even a perfect adjudicator is 67% accurate.
+`escape_monitor.py` appends incidents and joins them to the verdict cache on `candidate_sha`;
+UNKNOWN is its own bucket, never folded into CAUGHT (which flatters the gate) or ESCAPED (which
+slanders it), and below 10 ruled-on incidents it prints counts and refuses a percentage.
+Neither module writes to `verdict_cache`, edits `quarantine.json`, or touches a threshold.
 
-**Newly learned in the build — three things worth carrying forward.**
+**Newly learned in the build — four things worth carrying forward.**
 
 1. **Integration found what unit tests could not.** The first end-to-end run crashed on a path no
    self-check covered: `read_quarantine` returned a bare `[]` when the file was absent while its
@@ -470,7 +485,15 @@ writing to a JSONL log. No control path.
    root, not the cwd — it had been silently unrunnable from anywhere but one directory.
    `--expected-tests` counts **rows**; the store's `n_cases_*` columns count **cases**; the
    docstring now says so where the two meet.
-3. **The drift cron must not use the verdict cache.** On a quiet week `main` does not move, so the
+3. **A self-check that has never failed is not a test.** Phases 6 and 7 were built, then put
+   through three adversarial reviews and two mutation audits: 157 single-line mutations, of which
+   36 broke real logic while the self-check still printed OK. Only two were production defects —
+   the rest were a test suite that looked thorough and pinned nothing. The recurring shapes:
+   no *positive* assertion on rendered output (so emptying it passes); a guard covered only by an
+   all-or-nothing revert (so deleting any one conjunct passes); a fixture symmetric in the two
+   numbers being printed (so swapping them passes); and a constant with no assertion anywhere
+   (so `K = 20 → 1` passes). Write the mutation down, watch the check fail, then fix it.
+4. **The drift cron must not use the verdict cache.** On a quiet week `main` does not move, so the
    cache key is identical every night and night one's verdict would replay forever. The cache
    defends a PR against re-rolling; the nightly *must* re-roll. Same function, opposite requirement.
 
