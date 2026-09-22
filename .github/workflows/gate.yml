@@ -104,8 +104,10 @@ jobs:
           python3 escape_monitor.py --selfcheck
           PYTHONPATH=. python3 stats/adapter.py
           python3 verdict_cache.py
+          python3 retry_sim.py --selfcheck
           python3 scenarios.py > /dev/null
           python3 validate_workflows.py
+          cd ../eval && python3 lint_cases.py --selfcheck
       - name: Contract test
         env:
           PROMPTFOO_CONFIG_DIR: ${{ runner.temp }}/pfcontract-${{ github.run_id }}-${{ github.run_attempt }}
@@ -191,8 +193,8 @@ jobs:
 
       - name: Restore verdict cache
         # The retry-until-green defence only works if it survives a re-run.
-        # Measured: without it, five re-runs ship a -5pp regression 79% of the
-        # time. The cache is keyed per PR so one PR cannot pin another's verdict.
+        # Measured: without it, five re-runs ship a -5pp regression 60% of the
+        # time (regressgate/retry_sim.py). The cache is keyed per PR so one PR cannot pin another's verdict.
         uses: actions/cache/restore@v4
         with:
           path: regressgate/.verdicts

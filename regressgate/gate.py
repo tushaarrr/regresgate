@@ -69,8 +69,8 @@ def cache_keys(doc):
 
     The verdict is a pure function of these three, so a re-run is a lookup, not
     a new roll of the dice. Measured: without this, re-running CI five times
-    ships a -5pp regression 79% of the time and a -3pp one 98% of the time after
-    three. The developer samples exactly the distribution the gate samples, so no
+    ships a -5pp regression 60% of the time and a -3pp one 96% of the time after
+    three (retry_sim.py, at this suite's measured churn). The developer samples exactly the distribution the gate samples, so no
     amount of threshold calibration touches it -- best-of-k IS the attack.
     """
     head, base = doc.get("head") or {}, doc.get("baseline") or {}
@@ -90,7 +90,43 @@ def _cached_note(hit):
     )
 
 
+def collapse(pairs):
+    """Repeats of one case are NOT independent observations. Collapse them.
+
+    promptfoo --repeat N gives every case N samples per run, and they are
+    correlated: a deterministically broken case breaks all N times. Feeding
+    each sample to McNemar as its own observation multiplies the evidence by N
+    for a regression of unchanged size -- measured, with 300 cases and 6 of
+    them broken: COMMENT at --repeat 1, BLOCK at --repeat 3, and at --repeat 10
+    a SINGLE broken case reaches p = 0.00098 on its own. The repeat count is a
+    cost knob; it must not move the verdict.
+
+    quarantine.py already measures power in CASES ("pairs of one case are not
+    independent draws"), so the test has to be in cases too, or the floor is
+    guarding a different experiment from the one that runs.
+
+    The unit is (case_id, prompt_idx) -- one case under one prompt -- which is
+    the pair_id minus its repeat slot. A side passes if a STRICT majority of
+    its repeats passed; the same rule is applied to baseline and head, so a
+    flaky case is not pushed toward either verdict. That is what --repeat is
+    for: averaging out flakiness within a run, not inflating n.
+    """
+    units = {}
+    for p in pairs:
+        # pair_id is "{case_id}#{prompt_idx}#{repeat_slot}"
+        key = p["pair_id"].rsplit("#", 1)[0]
+        u = units.setdefault(key, {"case_id": p["case_id"], "b": [], "h": []})
+        u["b"].append(bool(p["baseline_pass"]))
+        u["h"].append(bool(p["head_pass"]))
+    return [{"pair_id": k, "case_id": u["case_id"],
+             "baseline_pass": sum(u["b"]) * 2 > len(u["b"]),
+             "head_pass": sum(u["h"]) * 2 > len(u["h"]),
+             "repeats": len(u["b"])}
+            for k, u in sorted(units.items())]
+
+
 def tally(pairs):
+    pairs = collapse(pairs)
     b = c = 0
     base_pass = head_pass = 0
     broken_ids = []
@@ -111,6 +147,7 @@ def tally(pairs):
         "broken_ids": sorted(set(broken_ids)),
         "rate_before": 100.0 * base_pass / n if n else 0.0,
         "rate_after": 100.0 * head_pass / n if n else 0.0,
+        "repeats": max((p.get("repeats", 1) for p in pairs), default=1),
     }
 
 
@@ -154,7 +191,7 @@ def decide(doc):
 
     t = tally(pairs)
     if t["n"] == 0:
-        return "HARD_FAIL", {"why": "zero paired samples", "seen": 0, "expected": expected}
+        return "HARD_FAIL", {"why": "zero paired cases", "seen": 0, "expected": expected}
 
     p, lo, hi, sig, material = significant(t)
     d = {"tally": t, "p": p, "ci": (lo, hi), "delta_pp": 100.0 * (t["b"] - t["c"]) / t["n"],
@@ -248,8 +285,11 @@ def render(decision, d):
     sign = "" if delta < 0 else "+"
     line = (f"Pass rate moved **{sign}{delta:.2f}pp** "
             f"(95% CI {lo:.2f}pp to {hi:.2f}pp), from **{t['rate_before']:.1f}%** to "
-            f"**{t['rate_after']:.1f}%** over {t['n']} paired samples. "
-            f"This change **broke {t['c']}** sample(s) that passed on the baseline and "
+            f"**{t['rate_after']:.1f}%** over {t['n']} paired cases"
+            + (f" ({t['repeats']} repeats each, collapsed by majority -- "
+               "repeats of one case are not independent observations)"
+               if t.get("repeats", 1) > 1 else "") + ". "
+            f"This change **broke {t['c']}** case(s) that passed on the baseline and "
             f"**fixed {t['b']}**. One-sided exact McNemar p = {p:.4g}.")
     L += [line, ""]
 

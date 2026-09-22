@@ -60,7 +60,13 @@ python3 pair.py --head "$T/base.json" --write-manifest "$T/manifest.json" >/dev/
 [ $? -eq 0 ] && ok "fixture manifest generated from its own baseline" || bad "manifest failed"
 
 echo "== head run with a real regression =="
-REGRESSGATE_DEMO_BREAK=2 code=$(REGRESSGATE_DEMO_BREAK=2 pf "$T/head.json")
+# FIVE of the twelve cases, not two. The gate counts CASES: repeats of one case
+# are collapsed by majority before McNemar, so --repeat 3 no longer triples the
+# evidence. On a 12-case suite the smallest break that clears p < 0.05 is 5
+# (b=0, c=5 -> p = 0.031). Two broken cases give p = 0.25, which is a PASS and
+# is correct. This assertion used to pass on two only because each was counted
+# three times -- the pseudo-replication gate.collapse() exists to stop.
+REGRESSGATE_DEMO_BREAK=5 code=$(REGRESSGATE_DEMO_BREAK=5 pf "$T/head.json")
 [ "$code" = 100 ] && ok "failing head exits 100 (not 1, not 0)" || bad "head exited $code"
 python3 fetch_baseline.py --head "$T/head.json" --dir "$T/bl" --out "$T/baseline.json" \
   >"$T/fetch.log" 2>&1

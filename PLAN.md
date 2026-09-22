@@ -14,7 +14,7 @@ Five things in the original plan were wrong or unsafe. In descending order of co
 
 | # | The draft said | Measured reality | Consequence |
 |---|---|---|---|
-| 1 | *(nothing)* | **Re-running CI ships a −5pp regression 79% of the time after 5 attempts** | The entire N-vs-churn apparatus was decoration. Fixed by verdict caching. |
+| 1 | *(nothing)* | **Re-running CI ships a −5pp regression 60% of the time after 5 attempts** (`retry_sim.py`) | The entire N-vs-churn apparatus was decoration. Fixed by verdict caching. |
 | 2 | Build an outcome-learning loop that recalibrates thresholds | **A loop is dominated by a zero-label policy, and its recommended substitute goes blind while reporting itself calibrated** | The RHCL layer is cut to four guardrails. |
 | 3 | `--repeat` + cache replays one value N times (issue #360) | **False since 0.121.4.** Cache is namespaced per repeat index | The trap is real but *cross-run*, and nastier than described. |
 | 4 | Read `__repeatIndex` in a Python assertion | **It is `None` there, stripped by design** | The documented workaround cannot work. Use provider echo. |
@@ -185,9 +185,16 @@ The draft's table stands (power 0.80 × the stated 1.15 buffer). Two corrections
 
 **Build 300 cases.** Unchanged.
 
-**The 1pp materiality floor was never sized.** At N=300 the smallest detectable shift is ≈−2.0pp,
-so gate condition (2) essentially never binds on its own. Either raise the floor to ~2pp or size
-the suite deliberately for 1pp — do not leave a criterion in the rule that cannot fire.
+**The 1pp materiality floor was never sized — and it is the criterion that binds most.** The claim
+here used to be that at N=300 the smallest detectable shift is ≈−2.0pp, so condition (2)
+"essentially never binds on its own". Both halves were wrong. The smallest shift the one-sided
+exact test can call at N=300 is **−1.67pp** (b=0, c=5, p=0.031), whose CI upper is −0.22pp — so
+condition (2) turns it into a COMMENT, which is condition (2) binding. Measured over the whole
+distribution by `retry_sim.py` at N=291 and the suite's measured 1.40% churn, of the 16.7% of true
+−5pp regressions that survive a single run, **13.6 points are the materiality bar and 3.1 points
+are the significance test**; at −3pp it is 38.2 against 26.4. The retry attack in §5 exists mostly
+because (2) binds. Keep the floor, and size the suite for it deliberately; do not raise it to 2pp
+on the belief that it is inert.
 
 ### The nightly drift monitor
 
@@ -247,7 +254,7 @@ concern from the design.
 ### What to build instead — four guardrails, no loop
 
 **A. Verdict caching, keyed on (candidate SHA, baseline SHA, judge snapshot).**
-Without it a −5pp regression ships 79% of the time after five re-runs and a −3pp ships 98% after
+Without it a −5pp regression ships 60% of the time after five re-runs and a −3pp ships 96% after
 three. No threshold calibration touches this — the developer samples the same distribution the
 gate samples. Any genuine re-measurement must **pool** repetitions; best-of-k *is* the attack.
 Highest-value item in the project, and it is an afternoon. Implemented: `verdict_cache.py`.
@@ -399,20 +406,25 @@ Each of these exists because something broke without it.
 
 ## 8. Build phases (revised)
 
-Phases 1–7 are built and run end to end against the real binary. **Phase 0 is the one thing
-blocking everything else**, and no amount of harness work substitutes for it: until the feature and
-its 300 cases exist, the suite is a 12-case placeholder with power@−5pp = 0.001 and the gate
-correctly refuses to block on anything.
+**All phases 0–7 are built, run end to end against the published binary, and measured.** The suite
+is the 300-case Meridian Support Assistant set (`eval/`, [PHASE0.md](eval/PHASE0.md)); five A/A
+replays give churn 1.40%, 9 quarantined cases and power@−5pp = 0.965, so the gate blocks rather
+than comments. What follows records what each phase turned out to be, including where the plan was
+wrong.
 
-**Phase 0 — pick the feature. ← THE ONLY OPEN PHASE.** Name the feature, its system prompt, and 20
-inputs you have seen it handle badly. Everything downstream is built and waiting on this.
+**Phase 0 — pick the feature. BUILT** (`eval/policy.md`, `eval/system_prompt.md`,
+`eval/provider.py`, `eval/PHASE0.md`). Meridian is a fictional B2B billing product whose every
+claim traces to a line of a policy file, chosen so that most assertions can be deterministic string
+checks — assertion churn is the entire power budget. Ten failure categories, 300 cases, 20 named
+bad inputs.
 
 **Phase 1 — golden set + run store. BUILT** (`parse.py`, `store.py`, `eval/`), *placeholder data.*
 Schema carries the `UNSCORED` state and a nullable `repeat_index` fed by provider echo; `store.py`
 grew a non-destructive `open_db()` beside the destructive demo `connect()`, because a nightly that
 wipes the series it extends reports OK forever. `eval/provider.py` pins the three things a real
 provider must keep: echo `__repeatIndex`, echo the **served** model id, keep `case_id` explicit.
-*Done when:* 300 real cases replace the placeholder twelve.
+*Done:* the 300 real cases replaced the placeholder twelve. The 12-case fixture survives as
+`eval/offline/`, which is what `e2e_test.sh` runs with no API key.
 
 **Phase 2 — flaky quarantine + churn. BUILT** (`quarantine.py`). Five A/A self-runs in, churn +
 quarantine + power@−5pp out, with the 6% ceiling, the 15% union cap and the 0.60 floor enforced as
@@ -529,13 +541,20 @@ disable it only for runs that must measure variance.
 
 ## 10. Open questions
 
-Unchanged from the draft, minus the ones now answered:
+**Answered by building it:**
 
-1. Can the golden cases be public? Decides Phase 1 effort.
-2. One repo or two?
-3. Is the OSS path wanted at all? Changes the license choice and the docs burden.
+- *Can the golden cases be public?* Yes, and they are — the feature under test is fictional, so the
+  suite carries no customer data. That is why Meridian exists.
+- *One repo or two?* One. The harness and the example suite ship together because the suite is what
+  proves the harness; `eval/` is an example, not the product.
+- *Is the OSS path wanted?* Yes — MIT, public repo.
+- *pass/fail vs 0–1 rubric?* Pass/fail. Graded scores are 2–5× cheaper in cases, but the
+  judge-calibration budget dominates that saving. 15 of 300 cases use `llm-rubric` against a
+  pinned judge; the rest are deterministic string checks.
 
-**Newly answered:** pass/fail vs 0–1 rubric — graded scores remain 2–5× cheaper in cases, but the
-judge-calibration budget now dominates that saving, so choose the rubric only if you can defend the
-scale. And the repo **must** be private or the scheduled workflow auto-disables after 60 days idle,
-which the dead-man's switch would then report as an outage every 30 hours.
+**Still open, and now a live risk because the repo is public:** GitHub disables a scheduled
+workflow in a public repository after **60 days with no repository activity**. The nightly drift
+job would stop silently, and the dead-man's switch would then alarm every 30 hours — correctly,
+but about GitHub rather than about the model. Any commit resets the clock; `workflow_dispatch` is
+on the workflow as a manual fallback. A repo that goes quiet for two months needs either a keepalive
+commit or an external scheduler.

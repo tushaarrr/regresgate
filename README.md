@@ -8,9 +8,10 @@ A statistical regression gate for LLM evals, built on top of
 
 Four things this repo found along the way, each measured rather than assumed:
 
-- **Re-running CI ships a −5pp regression 79% of the time after five
-  attempts.** A gate is a random variable and re-rolling it is free, so the
-  verdict is cached per `(commit, baseline, judge)` rather than recomputed.
+- **Re-running CI ships a −5pp regression 60% of the time after five
+  attempts**, and a −3pp one 99%. A gate is a random variable and re-rolling it
+  is free, so the verdict is cached per `(commit, baseline, judge)` rather than
+  recomputed. Regenerate the table with `python3 regressgate/retry_sim.py`.
 - **`sharing:` in a promptfoo config POSTs your entire eval off-box** — vars
   and outputs — exits 0, and warns about nothing. No promptfoo document
   mentions it. `preflight.py` refuses to run a config that sets it.
@@ -98,8 +99,9 @@ threshold to where power against the design effect size is 0.049.
 So there are four fixed guardrails instead:
 
 - **Verdict caching.** The gate is a random variable, and re-running CI
-  re-rolls it. Measured: without this, five re-runs ship a −5pp regression
-  **79%** of the time and a −3pp one 98% of the time after three. The verdict
+  re-rolls it. Measured at this suite's own churn: without this, five re-runs
+  ship a −5pp regression **60%** of the time and a −3pp one 96% after three.
+  Most of that leak is the materiality bar, not the significance test. The verdict
   is a pure function of `(candidate sha, baseline sha, judge snapshot)` and is
   cached, so a re-run is a lookup. Genuine re-measurement must *pool*
   repetitions — best-of-k **is** the attack.
@@ -120,14 +122,23 @@ So there are four fixed guardrails instead:
 npm install -g "promptfoo@$(cat regressgate/promptfoo.version)"   # node >= 22.22.0
 export OPENAI_API_KEY=...
 
+# 0. once per golden set: five A/A replays -> churn, exclusions, power
+for i in 1 2 3 4 5; do
+  promptfoo eval -c eval/promptfooconfig.yaml --no-cache -o /tmp/aa$i.json
+done
+python3 regressgate/quarantine.py --runs /tmp/aa*.json --out regressgate/quarantine.json
+
 # 1. run the suite
 promptfoo eval -c eval/promptfooconfig.yaml --no-cache --repeat 3 -o /tmp/head.json
 
-# 2. find a comparable baseline, pair, and gate
+# 2. find a comparable baseline, pair, and gate. Both shas are the verdict
+#    cache key: leave them out and every run is a fresh roll of the dice.
 python3 regressgate/fetch_baseline.py --head /tmp/head.json --out /tmp/base.json
 python3 regressgate/pair.py --head /tmp/head.json --baseline /tmp/base.json \
     --manifest regressgate/cases.manifest.json \
-    --quarantine regressgate/quarantine.json --out /tmp/pairing.json
+    --quarantine regressgate/quarantine.json \
+    --head-sha "$(git rev-parse HEAD)" --baseline-sha "$BASELINE_SHA" \
+    --out /tmp/pairing.json          # fetch_baseline.py --list shows the baseline's sha
 python3 regressgate/gate.py /tmp/pairing.json --cache-db /tmp/verdicts.db
 ```
 
@@ -154,20 +165,27 @@ for m in parse preflight pair fetch_baseline quarantine drift_monitor \
 | `regressgate/triage.py` | groups the broken cases by judge rationale. Reads only |
 | `regressgate/adjudicate.py` | fixed-K **pooled** re-measurement. Logged, never controlled |
 | `regressgate/escape_monitor.py` | production incidents vs what the gate said. The only external check |
-| `tests/` | twelve contract tests, one per promptfoo behaviour the harness depends on |
+| `tests/`, `regressgate/contract_test.sh` | twelve named contract tests and seven shell checks, one per promptfoo behaviour the harness depends on; both run in CI against the published binary, never a checkout |
 
 [PLAN.md](PLAN.md) is the design document, including what was cut and why.
 
 ## State
 
-The harness is built and green in CI. The golden set measures **279/300 =
-93.00%** against `gpt-4o-mini-2024-07-18` with the judge pinned to
-`gpt-4o-2024-11-20`.
+Built, green in CI, and measured. Five A/A replays of the 300-case suite with
+`gpt-4o-mini-2024-07-18` under test and the judge pinned to `gpt-4o-2024-11-20`:
 
-**The gate is advisory until Phase 2 is measured.** Churn and `power@−5pp` have
-not been established on this suite, so the power floor is unmeasured and every
-BLOCK degrades to a comment — deliberately. Run five A/A replays through
-`quarantine.py` and the gate starts blocking once churn ≤ 6% and power ≥ 0.60.
+| | measured | guardrail | |
+|---|---|---|---|
+| pass rate | 93.0% – 94.0% across replays | | |
+| churn | 1.40% | ≤ 6% | ok |
+| quarantined | 9 cases | ≤ 45 (15% of the suite) | ok |
+| power@−5pp | 0.965 | ≥ 0.60 | ok |
+
+291 cases gate. The nine unstable ones are in
+[regressgate/quarantine.json](regressgate/quarantine.json) together with the
+contract key they were measured on; a changed golden set, judge or pin makes
+that file inert until the replays are re-run, and churn over the ceiling makes
+the gate comment-only. Both are enforced in `pair.py`, not just documented.
 
 ## promptfoo behaviours this encodes
 

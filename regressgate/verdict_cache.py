@@ -1,13 +1,21 @@
 """Retry-until-green defence, and the power floor.
 
-Measured attack (adversary sim6, seed 13371337, N=300, churn 2%, 40k trials):
-a developer who just re-runs CI ships a regression with probability
+Measured attack. A developer who just re-runs CI ships a regression with
+probability (N=291 gating cases, churn 1.40% -- both measured on this suite by
+quarantine.py -- 40k trials, seed 20260922):
 
     true drop   1 run   2 runs  3 runs  5 runs
-      -2pp      0.920   0.994   0.999   1.000
-      -3pp      0.740   0.932   0.982   0.999
-      -5pp      0.268   0.462   0.607   0.789   <- the design effect size
-     -10pp      0.002   0.003   0.005   0.007
+      -2pp      0.881   0.986   0.998   1.000
+      -3pp      0.646   0.875   0.956   0.994
+      -5pp      0.167   0.306   0.422   0.599   <- the design effect size
+     -10pp      0.000   0.001   0.001   0.001
+
+Regenerate with `python3 retry_sim.py`, which scores every simulated run with
+gate.significant() itself. An earlier version of this table was written down
+from a simulation that was never committed and could not be reproduced: it
+claimed 0.268 / 0.789 at the -5pp row for N=300 and churn 2%, where the real
+figures at those parameters are 0.200 / 0.673. A number quoted in four files
+needs a script behind it.
 
 The gate is a random variable; re-rolling it is free and socially encouraged
 ("flaky CI, kick it"). No threshold calibration touches this, because the
